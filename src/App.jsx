@@ -9,8 +9,8 @@ const initialProducts = []
 
 const initialCategories = ['All']
 // Use environment variable for API URL, fallback to localhost for development
-// Temporarily hardcoded for production - TODO: Fix environment variables
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'https://posback-production-2407.up.railway.app/api' : 'https://localhost:4001/api')
+// Use environment variable or hardcoded production URL
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.MODE === 'production' ? 'https://posback-production-2407.up.railway.app/api' : 'https://localhost:4001/api')
 const IMAGE_BASE_URL = import.meta.env.VITE_IMAGE_BASE_URL || (import.meta.env.PROD ? 'https://posback-production-2407.up.railway.app' : 'https://localhost:4001')
 
 // LocalStorage keys

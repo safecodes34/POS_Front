@@ -16,7 +16,7 @@ const AppWrapper = () => {
       try {
         setLoading(true);
         setError(null);
-        const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'https://posback-production-2407.up.railway.app/api' : 'https://localhost:4001/api');
+        const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || (import.meta.env.MODE === 'production' ? 'https://posback-production-2407.up.railway.app/api' : 'https://localhost:4001/api');
         const response = await fetch(`${apiBaseUrl}/subscription/publishable-key`);
         
         if (!response.ok) {
@@ -31,7 +31,7 @@ const AppWrapper = () => {
         }
       } catch (error) {
         console.error('Error loading Stripe publishable key:', error);
-        const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'https://posback-production-2407.up.railway.app/api' : 'https://localhost:4001/api');
+        const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || (import.meta.env.MODE === 'production' ? 'https://posback-production-2407.up.railway.app/api' : 'https://localhost:4001/api');
         const backendUrl = apiBaseUrl.replace('/api', '');
         setError(error.message || `Failed to connect to backend. Make sure the backend server is running on ${backendUrl}`);
       } finally {
