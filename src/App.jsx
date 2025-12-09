@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import './App.css'
 import axios from 'axios'
 import { loadStripeTerminal } from '@stripe/terminal-js'
@@ -9,8 +9,9 @@ const initialProducts = []
 
 const initialCategories = ['All']
 // Use environment variable for API URL, fallback to localhost for development
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://localhost:4001/api'
-const IMAGE_BASE_URL = import.meta.env.VITE_IMAGE_BASE_URL || 'https://localhost:4001'
+// Temporarily hardcoded for production - TODO: Fix environment variables
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'https://posback-production-2407.up.railway.app/api' : 'https://localhost:4001/api')
+const IMAGE_BASE_URL = import.meta.env.VITE_IMAGE_BASE_URL || (import.meta.env.PROD ? 'https://posback-production-2407.up.railway.app' : 'https://localhost:4001')
 
 // LocalStorage keys
 const STORAGE_KEYS = {
@@ -3122,6 +3123,41 @@ function App() {
     }
   }, [])
 
+  // Handle embedded checkout completion
+  const handleCheckoutComplete = useCallback(async (sessionId) => {
+    try {
+      // Verify payment session
+      const response = await axios.get(`${API_BASE_URL}/subscription/verify-session`, {
+        params: { session_id: sessionId }
+      })
+      
+      if (response.data.success) {
+        // Update user subscription status
+        const updatedUser = {
+          ...currentUser,
+          subscriptionStatus: 'active'
+        }
+        setCurrentUser(updatedUser)
+        localStorage.setItem('pos_current_user', JSON.stringify(updatedUser))
+        
+        // Hide payment page and checkout
+        setShowPaymentPage(false)
+        setShowEmbeddedCheckout(false)
+        setIsProcessingPayment(false)
+        setCheckoutSessionId(null)
+        
+        alert('Payment successful! Welcome to your POS system.')
+      } else {
+        alert('Payment verification failed. Please try again.')
+        setIsProcessingPayment(false)
+      }
+    } catch (error) {
+      console.error('Error verifying payment:', error)
+      alert('Error verifying payment. Please contact support.')
+      setIsProcessingPayment(false)
+    }
+  }, [currentUser, setCurrentUser, setShowPaymentPage, setShowEmbeddedCheckout, setIsProcessingPayment, setCheckoutSessionId])
+
   // Initialize embedded checkout when clientSecret and ref are ready
   useEffect(() => {
     if (showEmbeddedCheckout && clientSecret && stripeInstance && checkoutRef.current) {
@@ -3161,41 +3197,6 @@ function App() {
       }
     }
   }, [showEmbeddedCheckout, clientSecret, stripeInstance, checkoutSessionId, handleCheckoutComplete])
-
-  // Handle embedded checkout completion
-  const handleCheckoutComplete = async (sessionId) => {
-    try {
-      // Verify payment session
-      const response = await axios.get(`${API_BASE_URL}/subscription/verify-session`, {
-        params: { session_id: sessionId }
-      })
-      
-      if (response.data.success) {
-        // Update user subscription status
-        const updatedUser = {
-          ...currentUser,
-          subscriptionStatus: 'active'
-        }
-        setCurrentUser(updatedUser)
-        localStorage.setItem('pos_current_user', JSON.stringify(updatedUser))
-        
-        // Hide payment page and checkout
-        setShowPaymentPage(false)
-        setShowEmbeddedCheckout(false)
-        setIsProcessingPayment(false)
-        setCheckoutSessionId(null)
-        
-        alert('Payment successful! Welcome to your POS system.')
-      } else {
-        alert('Payment verification failed. Please try again.')
-        setIsProcessingPayment(false)
-      }
-    } catch (error) {
-      console.error('Error verifying payment:', error)
-      alert('Error verifying payment. Please contact support.')
-      setIsProcessingPayment(false)
-    }
-  }
 
   // Handle subscription payment - create embedded checkout session
   const handleSubscriptionPayment = async (planId) => {
