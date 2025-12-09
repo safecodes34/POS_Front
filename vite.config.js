@@ -19,7 +19,7 @@ export default defineConfig({
     headers: {
       // Allow eval in development (Vite uses it for HMR)
       // Allow Stripe scripts and API connections
-      'Content-Security-Policy': "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1; script-src-elem 'self' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1; connect-src 'self' https://localhost:4001 https://api.stripe.com; object-src 'none';"
+      'Content-Security-Policy': "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1; script-src-elem 'self' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1; connect-src 'self' https://localhost:4001 https://api.stripe.com https://posback-production-2407.up.railway.app; object-src 'none';"
     }
   },
   preview: {
