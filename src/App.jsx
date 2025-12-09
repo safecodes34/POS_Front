@@ -10,10 +10,26 @@ const initialProducts = []
 const initialCategories = ['All']
 // Use environment variable for API URL, fallback to localhost for development
 // Hardcode production URL - environment variable not working in Vercel builds
-const API_BASE_URL = import.meta.env.MODE === 'production' 
+// Check for production mode or Vercel deployment - always use production URL when on Vercel
+const getIsProduction = () => {
+  if (typeof window === 'undefined') return false
+  return import.meta.env.PROD || 
+    import.meta.env.MODE === 'production' || 
+    window.location.hostname.includes('vercel.app') ||
+    window.location.hostname.includes('railway.app')
+}
+
+const isProduction = getIsProduction()
+// Always use hardcoded production URL when deployed - ignore env vars that might be incorrect
+const API_BASE_URL = isProduction
   ? 'https://posback-production-2407.up.railway.app/api'
   : (import.meta.env.VITE_API_BASE_URL || 'https://localhost:4001/api')
-const IMAGE_BASE_URL = import.meta.env.VITE_IMAGE_BASE_URL || (import.meta.env.PROD ? 'https://posback-production-2407.up.railway.app' : 'https://localhost:4001')
+const IMAGE_BASE_URL = import.meta.env.VITE_IMAGE_BASE_URL || (isProduction ? 'https://posback-production-2407.up.railway.app' : 'https://localhost:4001')
+
+// Log for debugging
+if (typeof window !== 'undefined') {
+  console.log('🔗 API Base URL:', API_BASE_URL, '| Production:', isProduction, '| Hostname:', window.location.hostname)
+}
 
 // LocalStorage keys
 const STORAGE_KEYS = {
@@ -3106,7 +3122,8 @@ function App() {
           setStripeInstance(stripe)
         }
       } catch (error) {
-        console.error('Error loading Stripe publishable key:', error)
+        console.error('Error loading Stripe publishable key for embedded checkout:', error)
+        // Continue without embedded checkout - other payment methods may still work
       }
     }
     

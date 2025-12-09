@@ -16,28 +16,44 @@ const AppWrapper = () => {
       try {
         setLoading(true);
         setError(null);
-        const apiBaseUrl = import.meta.env.MODE === 'production' 
+        // Check for production mode or Vercel deployment - always use production URL when on Vercel
+        // This ensures we always use the correct absolute URL, not a relative one
+        const isProduction = import.meta.env.PROD || 
+          import.meta.env.MODE === 'production' || 
+          window.location.hostname.includes('vercel.app') ||
+          window.location.hostname.includes('railway.app')
+        // Always use hardcoded production URL when deployed - ignore env vars that might be incorrect
+        const apiBaseUrl = isProduction
           ? 'https://posback-production-2407.up.railway.app/api'
           : (import.meta.env.VITE_API_BASE_URL || 'https://localhost:4001/api');
-        const response = await fetch(`${apiBaseUrl}/subscription/publishable-key`);
+        console.log('🔗 API Base URL:', apiBaseUrl, '| Production:', isProduction, '| Hostname:', window.location.hostname);
+        // Ensure URL is absolute
+        const fullUrl = apiBaseUrl.startsWith('http') ? `${apiBaseUrl}/subscription/publishable-key` : `https://${apiBaseUrl}/subscription/publishable-key`;
+        console.log('🔗 Full request URL:', fullUrl);
+        const response = await fetch(fullUrl);
         
         if (!response.ok) {
-          throw new Error(`Backend returned ${response.status}: ${response.statusText}`);
+          // If response is not OK, try to get error message
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Backend returned ${response.status}: ${response.statusText}`);
+          } else {
+            // If it's HTML (error page), provide a helpful message
+            throw new Error(`Backend returned ${response.status}. Make sure STRIPE_PUBLISHABLE_KEY is set in Railway environment variables.`);
+          }
         }
         
         const data = await response.json();
         if (data.publishableKey) {
           setStripePromise(loadStripe(data.publishableKey));
         } else {
-          throw new Error('No publishable key received from backend');
+          throw new Error('No publishable key received from backend. Check Railway environment variables.');
         }
       } catch (error) {
         console.error('Error loading Stripe publishable key:', error);
-        const apiBaseUrl = import.meta.env.MODE === 'production' 
-          ? 'https://posback-production-2407.up.railway.app/api'
-          : (import.meta.env.VITE_API_BASE_URL || 'https://localhost:4001/api');
-        const backendUrl = apiBaseUrl.replace('/api', '');
-        setError(error.message || `Failed to connect to backend. Make sure the backend server is running on ${backendUrl}`);
+        // Don't block the app - just log the error and continue without Stripe
+        setError(error.message || 'Failed to load Stripe. Payment features will be unavailable.');
       } finally {
         setLoading(false);
       }
@@ -57,57 +73,12 @@ const AppWrapper = () => {
         gap: '1rem'
       }}>
         <div>Loading...</div>
-        <div style={{ fontSize: '0.875rem', color: '#666' }}>Connecting to backend...</div>
+        <div style={{ fontSize: '0.875rem', color: '#666' }}>Initializing payment system...</div>
       </div>
     );
   }
   
-  if (error) {
-    return (
-      <div style={{ 
-        display: 'flex', 
-        flexDirection: 'column',
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '100vh',
-        gap: '1rem',
-        padding: '2rem',
-        textAlign: 'center'
-      }}>
-        <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#dc2626' }}>⚠️ Connection Error</div>
-        <div style={{ color: '#666', maxWidth: '500px' }}>{error}</div>
-        <button 
-          onClick={() => window.location.reload()} 
-          style={{
-            padding: '0.75rem 1.5rem',
-            backgroundColor: '#3b82f6',
-            color: 'white',
-            border: 'none',
-            borderRadius: '8px',
-            cursor: 'pointer',
-            fontSize: '1rem',
-            fontWeight: '500'
-          }}
-        >
-          Retry
-        </button>
-      </div>
-    );
-  }
-  
-  if (!stripePromise) {
-    return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '100vh' 
-      }}>
-        Initializing Stripe...
-      </div>
-    );
-  }
-  
+  // Continue even if Stripe fails - app will work without payment features
   return (
     <Elements stripe={stripePromise}>
       <App />
