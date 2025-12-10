@@ -409,10 +409,34 @@ function App() {
   const [isRemoveEmployeeModalOpen, setIsRemoveEmployeeModalOpen] = useState(false)
   const [employeeToRemove, setEmployeeToRemove] = useState(null)
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false)
+  // ============================================================================
+  // TEMPORARY DISABLE FLAGS - MUST BE RE-ENABLED LATER
+  // ============================================================================
+  // TODO: RE-ENABLE THESE FEATURES AFTER STRIPE ACCOUNT REVIEW IS COMPLETE
+  // Set both to true to re-enable signup/login and payment checkout pages
+  const ENABLE_SIGNUP_LOGIN_PAGE = false // Temporarily disabled - must re-enable later
+  const ENABLE_EMBEDDED_CHECKOUT_PAGE = false // Temporarily disabled - must re-enable later
+  // ============================================================================
+
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false)
   const [isSignupModalOpen, setIsSignupModalOpen] = useState(false)
   const [showSignupOnAuthPage, setShowSignupOnAuthPage] = useState(false)
-  const [showPaymentPage, setShowPaymentPage] = useState(false)
+  // Initialize showPaymentPage based on user's subscription status from localStorage
+  // This prevents UI flash before backend verification
+  const [showPaymentPage, setShowPaymentPage] = useState(() => {
+    try {
+      const stored = localStorage.getItem('pos_current_user')
+      if (stored) {
+        const user = JSON.parse(stored)
+        // Block UI if subscription status is not active
+        return (user.subscriptionStatus || 'pending') !== 'active'
+      }
+    } catch (error) {
+      // On error, block access
+      return true
+    }
+    return false
+  })
   const [selectedPlan, setSelectedPlan] = useState(null)
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [clientSecret, setClientSecret] = useState(null)
@@ -422,6 +446,11 @@ function App() {
   const [checkoutSessionId, setCheckoutSessionId] = useState(null)
   const [stripeInstance, setStripeInstance] = useState(null)
   const checkoutRef = useRef(null)
+  const checkoutInstanceRef = useRef(null)
+  const checkoutInitiatedRef = useRef(false)
+  const [discountCode, setDiscountCode] = useState('')
+  const [appliedDiscountCode, setAppliedDiscountCode] = useState(null)
+  const [isApplyingDiscount, setIsApplyingDiscount] = useState(false)
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const stored = localStorage.getItem('pos_current_user')
@@ -430,6 +459,66 @@ function App() {
       return null
     }
   })
+  
+  // CRITICAL: Check payment status on page load to prevent bypass
+  useEffect(() => {
+    const checkPaymentStatus = async () => {
+      if (currentUser && currentUser.email) {
+        // Always verify with backend - never trust localStorage alone
+        try {
+          // Verify user subscription status with backend - CRITICAL for security
+          const response = await axios.get(`${API_BASE_URL}/auth/user`, {
+            params: { email: currentUser.email }
+          })
+          
+          if (response.data) {
+            const userSubscriptionStatus = response.data.subscriptionStatus || 'pending'
+            
+            // Update user in state and localStorage with server data
+            setCurrentUser(response.data)
+            localStorage.setItem('pos_current_user', JSON.stringify(response.data))
+            
+            // Block UI access if payment not completed
+            if (userSubscriptionStatus !== 'active') {
+              setShowPaymentPage(true)
+            } else {
+              setShowPaymentPage(false)
+            }
+          } else {
+            // User not found or invalid - clear and show signup
+            setCurrentUser(null)
+            localStorage.removeItem('pos_current_user')
+            setShowPaymentPage(false)
+          }
+        } catch (error) {
+          // Handle 404 (user not found) gracefully - this is expected for new users
+          if (error.response?.status === 404) {
+            console.log('User not found in backend - showing signup')
+            // Clear invalid user data
+            setCurrentUser(null)
+            localStorage.removeItem('pos_current_user')
+            setShowPaymentPage(false)
+          } else {
+            console.error('Error verifying user payment status:', error)
+            // On other errors, clear user and show signup
+            setCurrentUser(null)
+            localStorage.removeItem('pos_current_user')
+            setShowPaymentPage(false)
+          }
+        }
+      } else if (currentUser && !currentUser.email) {
+        // User exists but no email - clear and show signup
+        setCurrentUser(null)
+        localStorage.removeItem('pos_current_user')
+        setShowPaymentPage(false)
+      } else if (!currentUser) {
+        // No user - show signup, not payment page
+        setShowPaymentPage(false)
+      }
+    }
+    
+    checkPaymentStatus()
+  }, []) // Run once on mount
   const [loginFormData, setLoginFormData] = useState({ email: '', password: '' })
   const [signupFormData, setSignupFormData] = useState({ email: '', password: '', confirmPassword: '' })
   const [authError, setAuthError] = useState('')
@@ -3063,7 +3152,9 @@ function App() {
         // Show payment page if subscription is pending (default for new users)
         const userSubscriptionStatus = response.data.user.subscriptionStatus || 'pending'
         if (userSubscriptionStatus === 'pending') {
+          // Set payment page to show - checkout will start automatically
           setShowPaymentPage(true)
+          setIsProcessingPayment(false)
         }
       }
     } catch (error) {
@@ -3112,17 +3203,19 @@ function App() {
 
   // Initialize Stripe for embedded checkout
   useEffect(() => {
-    const initStripe = async () => {
+    const initStripe = () => {
       try {
-        const keyResponse = await axios.get(`${API_BASE_URL}/subscription/publishable-key`)
-        const publishableKey = keyResponse.data.publishableKey
+        // Get publishable key from environment variable (Vite requires VITE_ prefix)
+        const publishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
         
         if (publishableKey && window.Stripe) {
           const stripe = window.Stripe(publishableKey)
           setStripeInstance(stripe)
+        } else if (!publishableKey) {
+          console.error('VITE_STRIPE_PUBLISHABLE_KEY is not set in environment variables')
         }
       } catch (error) {
-        console.error('Error loading Stripe publishable key for embedded checkout:', error)
+        console.error('Error initializing Stripe for embedded checkout:', error)
         // Continue without embedded checkout - other payment methods may still work
       }
     }
@@ -3151,11 +3244,17 @@ function App() {
       })
       
       if (response.data.success) {
-        // Update user subscription status
+        // Update user based on payment type
         const updatedUser = {
           ...currentUser,
           subscriptionStatus: 'active'
         }
+        
+        // Mark setup fee as paid if it was a one-time payment
+        if (response.data.mode === 'payment' || response.data.planType === 'one-time') {
+          updatedUser.setupFeePaid = true
+        }
+        
         setCurrentUser(updatedUser)
         localStorage.setItem('pos_current_user', JSON.stringify(updatedUser))
         
@@ -3164,8 +3263,10 @@ function App() {
         setShowEmbeddedCheckout(false)
         setIsProcessingPayment(false)
         setCheckoutSessionId(null)
+        setDiscountCode('')
+        setAppliedDiscountCode(null)
         
-        alert('Payment successful! Welcome to your POS system.')
+        alert('Payment successful! You have been charged $99.00 setup fee and $30.00/month subscription. Welcome to your POS system!')
       } else {
         alert('Payment verification failed. Please try again.')
         setIsProcessingPayment(false)
@@ -3180,29 +3281,60 @@ function App() {
   // Initialize embedded checkout when clientSecret and ref are ready
   useEffect(() => {
     if (showEmbeddedCheckout && clientSecret && stripeInstance && checkoutRef.current) {
-      let checkout = null
+      // Prevent re-initialization if already mounted
+      if (checkoutInstanceRef.current) {
+        return
+      }
+
+      let pollInterval = null
       
       const initCheckout = async () => {
         try {
-          checkout = stripeInstance.initEmbeddedCheckout({
+          // initEmbeddedCheckout returns a Promise, so we need to await it
+          const checkout = await stripeInstance.initEmbeddedCheckout({
             clientSecret: clientSecret
           })
           
+          // Store checkout instance in ref for cleanup
+          checkoutInstanceRef.current = checkout
+          
           await checkout.mount(checkoutRef.current)
           
-          // Listen for checkout completion
-          checkout.on('complete', () => {
-            if (checkoutSessionId) {
-              handleCheckoutComplete(checkoutSessionId)
-            }
-          })
+          // Poll for checkout completion since embedded checkout doesn't have .on() method
+          if (checkoutSessionId) {
+            pollInterval = setInterval(async () => {
+              try {
+                const response = await axios.get(`${API_BASE_URL}/subscription/verify-session`, {
+                  params: { session_id: checkoutSessionId }
+                })
+                
+                // Handle both one-time payments and subscriptions
+                if (response.data.success && response.data.paymentStatus === 'paid') {
+                  // Payment completed, stop polling and handle completion
+                  clearInterval(pollInterval)
+                  pollInterval = null
+                  handleCheckoutComplete(checkoutSessionId)
+                }
+              } catch (error) {
+                // Ignore polling errors - session might not be ready yet
+                // Only log if it's not a 404 or expected error
+                if (error.response?.status !== 404) {
+                  console.debug('Polling session status...', error.message)
+                }
+              }
+            }, 2000) // Poll every 2 seconds
+          }
         } catch (error) {
           console.error('Error initializing embedded checkout:', error)
-          alert('Error loading payment form. Please try again.')
-          setShowEmbeddedCheckout(false)
-          setIsProcessingPayment(false)
-          setClientSecret(null)
-          setCheckoutSessionId(null)
+          // Only reset if it's a critical error - don't reset on every error
+          if (error.message && !error.message.includes('already mounted')) {
+            alert('Error loading payment form. Please try again.')
+            setShowEmbeddedCheckout(false)
+            setIsProcessingPayment(false)
+            setClientSecret(null)
+            setCheckoutSessionId(null)
+            checkoutInitiatedRef.current = false // Allow retry
+          }
         }
       }
       
@@ -3210,14 +3342,113 @@ function App() {
       
       // Cleanup function
       return () => {
-        if (checkout) {
-          checkout.unmount().catch(console.error)
+        if (pollInterval) {
+          clearInterval(pollInterval)
+        }
+        if (checkoutInstanceRef.current) {
+          try {
+            checkoutInstanceRef.current.unmount()
+          } catch (error) {
+            console.error('Error unmounting checkout:', error)
+          }
+          checkoutInstanceRef.current = null
         }
       }
     }
   }, [showEmbeddedCheckout, clientSecret, stripeInstance, checkoutSessionId, handleCheckoutComplete])
 
   // Handle subscription payment - create embedded checkout session
+  // Function to create checkout session with optional discount code
+  const createCheckoutSession = async (discountCodeToApply = null) => {
+    if (!currentUser || !currentUser.email) {
+      throw new Error('User email is required')
+    }
+
+    const response = await axios.post(`${API_BASE_URL}/subscription/create-subscription`, {
+      email: currentUser.email,
+      discountCode: discountCodeToApply
+    })
+
+    if (!response.data.clientSecret || !response.data.sessionId) {
+      throw new Error('Failed to create checkout session')
+    }
+
+    return {
+      sessionId: response.data.sessionId,
+      clientSecret: response.data.clientSecret
+    }
+  }
+
+  // Function to recreate checkout session (used when applying/removing discount)
+  const handleRecreateCheckout = async (discountCodeToApply = null) => {
+    if (!currentUser || !currentUser.email) {
+      return
+    }
+
+    setIsApplyingDiscount(true)
+    
+    try {
+      // Unmount existing checkout if it exists
+      if (checkoutInstanceRef.current) {
+        try {
+          await checkoutInstanceRef.current.unmount()
+        } catch (error) {
+          console.error('Error unmounting checkout:', error)
+        }
+        checkoutInstanceRef.current = null
+      }
+
+      // Create new checkout session with discount code
+      const { sessionId, clientSecret } = await createCheckoutSession(discountCodeToApply)
+      
+      setCheckoutSessionId(sessionId)
+      setClientSecret(clientSecret)
+      // The useEffect will automatically remount the checkout with the new clientSecret
+      
+      setIsApplyingDiscount(false)
+    } catch (error) {
+      console.error('Error recreating checkout:', error)
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to apply discount code'
+      alert(`Error: ${errorMessage}`)
+      setIsApplyingDiscount(false)
+    }
+  }
+
+  // Function to handle applying discount code
+  const handleApplyDiscount = async () => {
+    if (!discountCode.trim()) {
+      return
+    }
+
+    setIsApplyingDiscount(true)
+    
+    try {
+      // Unmount existing checkout
+      if (checkoutInstanceRef.current) {
+        try {
+          await checkoutInstanceRef.current.unmount()
+        } catch (error) {
+          console.error('Error unmounting checkout:', error)
+        }
+        checkoutInstanceRef.current = null
+      }
+
+      // Create new checkout session with discount code
+      const { sessionId, clientSecret } = await createCheckoutSession(discountCode.trim())
+      
+      setCheckoutSessionId(sessionId)
+      setClientSecret(clientSecret)
+      setAppliedDiscountCode(discountCode.trim())
+      
+      setIsApplyingDiscount(false)
+    } catch (error) {
+      console.error('Error applying discount code:', error)
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to apply discount code'
+      alert(`Error applying discount code: ${errorMessage}`)
+      setIsApplyingDiscount(false)
+    }
+  }
+
   const handleSubscriptionPayment = async (planId) => {
     if (!currentUser) {
       alert('Please log in first')
@@ -3225,40 +3456,124 @@ function App() {
     }
     
     setIsProcessingPayment(true)
-    setSelectedPlan(planId)
+    setSelectedPlan(planId || 'complete')
     
     try {
-      const response = await axios.post(`${API_BASE_URL}/subscription/create-subscription`, {
-        email: currentUser.email,
-        planId: planId
-      })
+      const { sessionId, clientSecret } = await createCheckoutSession(appliedDiscountCode)
       
-      if (response.data.clientSecret && response.data.sessionId) {
-        setCheckoutSessionId(response.data.sessionId)
-        setClientSecret(response.data.clientSecret)
-        setShowEmbeddedCheckout(true)
-        setIsProcessingPayment(false)
-      } else {
-        alert('Failed to create subscription')
-        setIsProcessingPayment(false)
-      }
+      setCheckoutSessionId(sessionId)
+      setClientSecret(clientSecret)
+      setShowEmbeddedCheckout(true)
+      setIsProcessingPayment(false)
     } catch (error) {
       console.error('Error creating subscription:', error)
-      alert(`Error: ${error.response?.data?.error || error.message || 'Failed to start payment'}`)
+      console.error('Error response:', error.response?.data)
+      console.error('Full error:', JSON.stringify(error.response?.data, null, 2))
+      
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to start payment'
+      const errorType = error.response?.data?.type ? `\nType: ${error.response.data.type}` : ''
+      const errorCode = error.response?.data?.code ? `\nCode: ${error.response.data.code}` : ''
+      
+      alert(`Error creating subscription: ${errorMessage}${errorType}${errorCode}\n\nPlease check the browser console for more details.`)
       setIsProcessingPayment(false)
     }
   }
   
+  // Automatically start checkout when payment page is shown (skip plan selection)
+  // ONLY run when we have a valid user with email
+  useEffect(() => {
+    // Reset the initiated flag when payment page is hidden
+    if (!showPaymentPage) {
+      checkoutInitiatedRef.current = false
+      return
+    }
+
+    if (
+      showPaymentPage && 
+      currentUser && 
+      currentUser.email && 
+      !showEmbeddedCheckout && 
+      !clientSecret && 
+      !isProcessingPayment &&
+      !checkoutInitiatedRef.current
+    ) {
+      // Mark as initiated to prevent multiple attempts
+      checkoutInitiatedRef.current = true
+      
+      // Automatically start the checkout process - skip the plan selection page
+      const startCheckout = async () => {
+        if (!currentUser || !currentUser.email) {
+          console.error('No current user or email found')
+          checkoutInitiatedRef.current = false
+          return
+        }
+        
+        console.log('🚀 Starting checkout process for:', currentUser.email)
+        setIsProcessingPayment(true)
+        setSelectedPlan('complete')
+        
+        try {
+          // Use applied discount code if available, otherwise use default (applied in backend)
+          const { sessionId, clientSecret } = await createCheckoutSession(appliedDiscountCode)
+          
+          console.log('✅ Checkout session created')
+          
+          setCheckoutSessionId(sessionId)
+          setClientSecret(clientSecret)
+          setShowEmbeddedCheckout(true)
+          setIsProcessingPayment(false)
+        } catch (error) {
+          console.error('❌ Error creating subscription (auto-start):', error)
+          console.error('Error response:', error.response?.data)
+          console.error('Error details:', {
+            message: error.message,
+            response: error.response?.data,
+            status: error.response?.status,
+            config: error.config?.url
+          })
+          setIsProcessingPayment(false)
+          checkoutInitiatedRef.current = false // Allow retry via button
+          
+          // Extract user-friendly error message
+          const errorData = error.response?.data || {}
+          const errorMessage = errorData.error || error.message || 'Unknown error'
+          
+          // Check if this is an account review related error
+          const isAccountReview = errorMessage.toLowerCase().includes('review') || 
+                                   errorMessage.toLowerCase().includes('restricted') ||
+                                   errorData.code === 'account_invalid'
+          
+          if (isAccountReview) {
+            alert(`⚠️ Account Review Issue\n\n${errorMessage}\n\nPlease check your Stripe Dashboard to see your account status. Payment processing will be available once your account review is complete.\n\nClick "Start Payment" to try again after the review.`)
+          } else {
+            alert(`Auto-start failed: ${errorMessage}\n\nPlease click "Start Payment" to try again.`)
+          }
+        }
+      }
+      
+      // Small delay to ensure state is ready
+      const timer = setTimeout(() => {
+        startCheckout()
+      }, 100)
+      
+      return () => clearTimeout(timer)
+    }
+  }, [showPaymentPage, currentUser, showEmbeddedCheckout, clientSecret])
+
   // Check for payment success or cancellation in URL (runs on mount and when currentUser changes)
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search)
     const sessionId = urlParams.get('session_id')
     const canceled = urlParams.get('canceled')
     
-    // Handle canceled payment
+    // Handle canceled payment - keep payment page visible, user must complete payment
     if (canceled === 'true') {
       setIsProcessingPayment(false)
-      setShowPaymentPage(false)
+      setShowEmbeddedCheckout(false)
+      setClientSecret(null)
+      setCheckoutSessionId(null)
+      checkoutInitiatedRef.current = false
+      // Keep showPaymentPage true - user cannot access UI without payment
       // Clean URL
       window.history.replaceState({}, document.title, window.location.pathname)
       return
@@ -3296,7 +3611,7 @@ function App() {
           // Clean URL
           window.history.replaceState({}, document.title, window.location.pathname)
           
-          alert('Payment successful! Welcome to your POS system.')
+          alert('Payment successful! You have been charged $99.00 setup fee and $30.00/month subscription. Welcome to your POS system!')
         } else {
           alert('Payment verification failed. Please try again.')
           setIsProcessingPayment(false)
@@ -4671,72 +4986,156 @@ function App() {
   // Get filtered transactions
   const filteredTransactions = filterTransactions(transactions, transactionSearchQuery)
 
+  // ============================================================================
+  // TEMPORARILY DISABLED: EMBEDDED CHECKOUT PAGE
+  // TODO: RE-ENABLE THIS AFTER STRIPE ACCOUNT REVIEW IS COMPLETE
+  // Set ENABLE_EMBEDDED_CHECKOUT_PAGE to true to re-enable
+  // ============================================================================
   // Show payment page if user needs to complete subscription
-  if (currentUser && showPaymentPage) {
-    const plans = [
-      {
-        id: 'basic',
-        name: 'Basic Plan',
-        price: 29.99,
-        description: 'Perfect for small businesses',
-        features: ['Up to 100 products', 'Basic reporting', 'Email support', 'Mobile access']
-      },
-      {
-        id: 'pro',
-        name: 'Pro Plan',
-        price: 59.99,
-        description: 'For growing businesses',
-        features: ['Unlimited products', 'Advanced reporting', 'Priority support', 'Team management', 'Custom branding'],
-        popular: true
-      },
-      {
-        id: 'enterprise',
-        name: 'Enterprise Plan',
-        price: 99.99,
-        description: 'For large operations',
-        features: ['Everything in Pro', 'Dedicated support', 'Custom integrations', 'Advanced analytics', 'API access']
-      }
-    ]
-    
-    // Show embedded checkout if a plan was selected
+  // Block access to main UI until payment is complete
+  // IMPORTANT: Only show payment page if user is logged in (has email)
+  // If no user, show signup/login page instead
+  if (ENABLE_EMBEDDED_CHECKOUT_PAGE && currentUser && currentUser.email && showPaymentPage) {
+    // Show embedded checkout if clientSecret is ready
     if (showEmbeddedCheckout && clientSecret) {
-      const selectedPlanData = plans.find(p => p.id === selectedPlan)
-      
       return (
         <div className="app-container" style={{ 
           display: 'flex', 
           alignItems: 'center', 
           justifyContent: 'center', 
-          minHeight: '100vh', 
+          height: '100vh',
+          overflow: 'auto',
           background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          padding: '2rem'
+          padding: '1rem'
         }}>
           <div style={{ 
             width: '100%', 
             maxWidth: '600px',
             backgroundColor: 'white',
             borderRadius: '16px',
-            padding: '2rem',
-            boxShadow: '0 10px 40px rgba(0,0,0,0.2)'
+            padding: '1.5rem',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.2)',
+            margin: 'auto',
+            maxHeight: 'calc(100vh - 2rem)',
+            display: 'flex',
+            flexDirection: 'column'
           }}>
             <div style={{ 
               textAlign: 'center', 
-              marginBottom: '2rem'
+              marginBottom: '1.5rem',
+              flexShrink: 0
             }}>
-              <h1 style={{ fontSize: '2rem', fontWeight: '700', marginBottom: '0.5rem', color: '#111' }}>
+              <h1 style={{ fontSize: '1.75rem', fontWeight: '700', marginBottom: '0.5rem', color: '#111' }}>
                 Complete Your Payment
               </h1>
-              {selectedPlanData && (
-                <p style={{ fontSize: '1rem', color: '#666' }}>
-                  {selectedPlanData.name} - ${selectedPlanData.price}/month
-                </p>
-              )}
+              <p style={{ fontSize: '0.95rem', color: '#666' }}>
+                Setup Fee: $99.00 (one-time) + Monthly: $30.00/month
+              </p>
             </div>
+            
+            {/* Discount Code Input */}
+            {!appliedDiscountCode ? (
+              <div style={{ 
+                marginBottom: '1rem', 
+                flexShrink: 0,
+                display: 'flex',
+                gap: '0.5rem'
+              }}>
+                <input
+                  type="text"
+                  placeholder="Enter discount code"
+                  value={discountCode}
+                  onChange={(e) => setDiscountCode(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter' && discountCode.trim()) {
+                      handleApplyDiscount()
+                    }
+                  }}
+                  style={{
+                    flex: '1',
+                    padding: '0.75rem',
+                    border: '2px solid #ddd',
+                    borderRadius: '8px',
+                    fontSize: '0.95rem',
+                    outline: 'none',
+                    transition: 'border-color 0.2s'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = '#667eea'}
+                  onBlur={(e) => e.target.style.borderColor = '#ddd'}
+                />
+                <button
+                  onClick={handleApplyDiscount}
+                  disabled={!discountCode.trim() || isApplyingDiscount}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    backgroundColor: discountCode.trim() && !isApplyingDiscount ? '#667eea' : '#ccc',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '0.95rem',
+                    fontWeight: '600',
+                    cursor: discountCode.trim() && !isApplyingDiscount ? 'pointer' : 'not-allowed',
+                    transition: 'background-color 0.2s',
+                    whiteSpace: 'nowrap'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (discountCode.trim() && !isApplyingDiscount) {
+                      e.target.style.backgroundColor = '#5568d3'
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (discountCode.trim() && !isApplyingDiscount) {
+                      e.target.style.backgroundColor = '#667eea'
+                    }
+                  }}
+                >
+                  {isApplyingDiscount ? 'Applying...' : 'Apply'}
+                </button>
+              </div>
+            ) : (
+              <div style={{
+                marginBottom: '1rem',
+                padding: '0.75rem',
+                backgroundColor: '#e8f5e9',
+                border: '1px solid #4caf50',
+                borderRadius: '8px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexShrink: 0
+              }}>
+                <span style={{ fontSize: '0.95rem', color: '#2e7d32', fontWeight: '600' }}>
+                  Discount applied: {appliedDiscountCode}
+                </span>
+                <button
+                  onClick={() => {
+                    setAppliedDiscountCode(null)
+                    setDiscountCode('')
+                    // Recreate checkout without discount
+                    handleRecreateCheckout(null)
+                  }}
+                  style={{
+                    padding: '0.25rem 0.75rem',
+                    backgroundColor: 'transparent',
+                    color: '#2e7d32',
+                    border: '1px solid #4caf50',
+                    borderRadius: '4px',
+                    fontSize: '0.85rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            )}
             
             <div 
               ref={checkoutRef}
               style={{
-                minHeight: '500px'
+                flex: '1',
+                overflow: 'auto',
+                minHeight: '400px',
+                maxHeight: 'calc(100vh - 300px)'
               }}
             />
             
@@ -4747,6 +5146,9 @@ function App() {
                 setCheckoutSessionId(null)
                 setSelectedPlan(null)
                 setIsProcessingPayment(false)
+                checkoutInitiatedRef.current = false
+                setDiscountCode('')
+                setAppliedDiscountCode(null)
               }}
               style={{
                 width: '100%',
@@ -4759,7 +5161,8 @@ function App() {
                 fontSize: '1rem',
                 fontWeight: '600',
                 cursor: 'pointer',
-                transition: 'background-color 0.2s'
+                transition: 'background-color 0.2s',
+                flexShrink: 0
               }}
               onMouseEnter={(e) => e.target.style.backgroundColor = '#5a6268'}
               onMouseLeave={(e) => e.target.style.backgroundColor = '#6c757d'}
@@ -4771,6 +5174,8 @@ function App() {
       )
     }
     
+    // Show loading state while checkout is being initialized
+    // Also show retry button if not processing (means there was an error)
     return (
       <div className="app-container" style={{ 
         display: 'flex', 
@@ -4781,217 +5186,135 @@ function App() {
         padding: '2rem'
       }}>
         <div style={{ 
-          width: '100%', 
-          maxWidth: '1200px',
-          padding: '2rem'
+          textAlign: 'center', 
+          color: 'white',
+          maxWidth: '500px'
         }}>
-          <div style={{ 
-            textAlign: 'center', 
-            marginBottom: '3rem',
-            color: 'white'
-          }}>
-            <h1 style={{ fontSize: '2.5rem', fontWeight: '700', marginBottom: '0.5rem' }}>
-              Choose Your Plan
-            </h1>
-            <p style={{ fontSize: '1.2rem', opacity: 0.9 }}>
-              Complete your subscription to start using the POS system
-            </p>
-          </div>
-          
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-            gap: '2rem',
-            marginBottom: '2rem'
-          }}>
-            {plans.map(plan => (
-              <div
-                key={plan.id}
+          {isProcessingPayment ? (
+            <>
+              <div style={{
+                width: '50px',
+                height: '50px',
+                border: '4px solid rgba(255,255,255,0.3)',
+                borderTop: '4px solid white',
+                borderRadius: '50%',
+                margin: '0 auto 1.5rem',
+                animation: 'spin 1s linear infinite'
+              }} />
+              <style>{`
+                @keyframes spin {
+                  0% { transform: rotate(0deg); }
+                  100% { transform: rotate(360deg); }
+                }
+              `}</style>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: '600', marginBottom: '0.5rem' }}>
+                Loading Payment Form...
+              </h2>
+              <p style={{ fontSize: '1rem', opacity: 0.9 }}>
+                Preparing your checkout
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: '600', marginBottom: '1rem' }}>
+                Ready to Complete Payment
+              </h2>
+              <p style={{ fontSize: '1rem', opacity: 0.9, marginBottom: '2rem' }}>
+                Setup Fee: $99.00 (one-time) + Monthly: $30.00/month
+              </p>
+              <button
+                onClick={async () => {
+                  console.log('🔘 Start Payment button clicked')
+                  console.log('Current user:', currentUser)
+                  console.log('Checkout initiated:', checkoutInitiatedRef.current)
+                  
+                  if (!currentUser) {
+                    console.error('❌ No current user')
+                    alert('Please log in first')
+                    return
+                  }
+                  
+                  if (checkoutInitiatedRef.current) {
+                    console.log('⚠️ Checkout already initiated, resetting...')
+                    checkoutInitiatedRef.current = false
+                  }
+                  
+                  checkoutInitiatedRef.current = true
+                  setIsProcessingPayment(true)
+                  
+                  try {
+                    console.log('📤 Creating subscription for:', currentUser.email)
+                    // Use applied discount code if available, otherwise use default (applied in backend)
+                    const { sessionId, clientSecret } = await createCheckoutSession(appliedDiscountCode)
+                    
+                    console.log('✅ Setting checkout data')
+                    setCheckoutSessionId(sessionId)
+                    setClientSecret(clientSecret)
+                    setShowEmbeddedCheckout(true)
+                    setIsProcessingPayment(false)
+                  } catch (error) {
+                    console.error('❌ Error creating subscription:', error)
+                    console.error('Error details:', {
+                      message: error.message,
+                      response: error.response?.data,
+                      status: error.response?.status
+                    })
+                    
+                    // Extract user-friendly error message
+                    const errorData = error.response?.data || {}
+                    const errorMessage = errorData.error || error.message || 'Failed to start payment'
+                    
+                    // Check if this is an account review related error
+                    const isAccountReview = errorMessage.toLowerCase().includes('review') || 
+                                             errorMessage.toLowerCase().includes('restricted') ||
+                                             errorData.code === 'account_invalid'
+                    
+                    if (isAccountReview) {
+                      alert(`⚠️ Account Review Issue\n\n${errorMessage}\n\nYour Stripe account is currently under review. Payment processing is temporarily unavailable until Stripe completes the review process.\n\nPlease check your Stripe Dashboard for updates on your account status.`)
+                    } else {
+                      alert(`Error: ${errorMessage}`)
+                    }
+                    
+                    setIsProcessingPayment(false)
+                    checkoutInitiatedRef.current = false
+                  }
+                }}
                 style={{
+                  padding: '1rem 2rem',
                   backgroundColor: 'white',
-                  borderRadius: '16px',
-                  padding: '2rem',
-                  boxShadow: '0 10px 40px rgba(0,0,0,0.2)',
-                  border: plan.popular ? '3px solid #1e3a5f' : '2px solid #e0e0e0',
-                  position: 'relative',
-                  transition: 'transform 0.2s, box-shadow 0.2s',
-                  cursor: 'pointer'
+                  color: '#667eea',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '1.1rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-5px)'
-                  e.currentTarget.style.boxShadow = '0 15px 50px rgba(0,0,0,0.3)'
+                  e.target.style.backgroundColor = '#f0f0f0'
+                  e.target.style.transform = 'translateY(-2px)'
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)'
-                  e.currentTarget.style.boxShadow = '0 10px 40px rgba(0,0,0,0.2)'
+                  e.target.style.backgroundColor = 'white'
+                  e.target.style.transform = 'translateY(0)'
                 }}
               >
-                {plan.popular && (
-                  <div style={{
-                    position: 'absolute',
-                    top: '-12px',
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    backgroundColor: '#1e3a5f',
-                    color: 'white',
-                    padding: '0.5rem 1.5rem',
-                    borderRadius: '20px',
-                    fontSize: '0.85rem',
-                    fontWeight: '600'
-                  }}>
-                    Most Popular
-                  </div>
-                )}
-                
-                <h2 style={{ 
-                  fontSize: '1.5rem', 
-                  fontWeight: '700', 
-                  marginBottom: '0.5rem',
-                  color: '#111'
-                }}>
-                  {plan.name}
-                </h2>
-                
-                <p style={{ 
-                  color: '#666', 
-                  marginBottom: '1.5rem',
-                  fontSize: '0.95rem'
-                }}>
-                  {plan.description}
-                </p>
-                
-                <div style={{ 
-                  marginBottom: '1.5rem',
-                  paddingBottom: '1.5rem',
-                  borderBottom: '2px solid #e0e0e0'
-                }}>
-                  <span style={{ 
-                    fontSize: '3rem', 
-                    fontWeight: '700', 
-                    color: '#1e3a5f'
-                  }}>
-                    ${plan.price}
-                  </span>
-                  <span style={{ 
-                    fontSize: '1rem', 
-                    color: '#666',
-                    marginLeft: '0.5rem'
-                  }}>
-                    /month
-                  </span>
-                </div>
-                
-                <ul style={{
-                  listStyle: 'none',
-                  padding: 0,
-                  margin: '0 0 2rem 0'
-                }}>
-                  {plan.features.map((feature, index) => (
-                    <li key={index} style={{
-                      padding: '0.75rem 0',
-                      borderBottom: index < plan.features.length - 1 ? '1px solid #f0f0f0' : 'none',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.75rem'
-                    }}>
-                      <svg 
-                        width="20" 
-                        height="20" 
-                        viewBox="0 0 24 24" 
-                        fill="none" 
-                        stroke="#1e3a5f" 
-                        strokeWidth="2"
-                        style={{ flexShrink: 0 }}
-                      >
-                        <polyline points="20 6 9 17 4 12"></polyline>
-                      </svg>
-                      <span style={{ color: '#333', fontSize: '0.95rem' }}>{feature}</span>
-                    </li>
-                  ))}
-                </ul>
-                
-                <button
-                  onClick={() => handleSubscriptionPayment(plan.id)}
-                  disabled={isProcessingPayment || showPaymentForm}
-                  style={{
-                    width: '100%',
-                    padding: '1rem',
-                    backgroundColor: plan.popular ? '#1e3a5f' : '#28a745',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    fontSize: '1rem',
-                    fontWeight: '600',
-                    cursor: (isProcessingPayment || showPaymentForm) ? 'not-allowed' : 'pointer',
-                    opacity: (isProcessingPayment || showPaymentForm) ? 0.6 : 1,
-                    transition: 'background-color 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isProcessingPayment && !showPaymentForm) {
-                      e.target.style.backgroundColor = plan.popular ? '#152a42' : '#218838'
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isProcessingPayment && !showPaymentForm) {
-                      e.target.style.backgroundColor = plan.popular ? '#1e3a5f' : '#28a745'
-                    }
-                  }}
-                >
-                  {isProcessingPayment && selectedPlan === plan.id ? 'Processing...' : 'Select Plan'}
-                </button>
-              </div>
-            ))}
-          </div>
-          
-          <div style={{
-            textAlign: 'center',
-            color: 'white',
-            opacity: 0.9,
-            fontSize: '0.9rem'
-          }}>
-            <p>All plans include a 14-day free trial. Cancel anytime.</p>
-          </div>
-          
-          {/* Payment Form Modal */}
-          {showPaymentForm && clientSecret && (
-            <PaymentFormModal
-              clientSecret={clientSecret}
-              subscriptionId={subscriptionId}
-              selectedPlan={selectedPlan}
-              plans={plans}
-              onSuccess={() => {
-                setShowPaymentForm(false)
-                setShowPaymentPage(false)
-                setClientSecret(null)
-                setSubscriptionId(null)
-                setSelectedPlan(null)
-                // Update user subscription status
-                setCurrentUser(prev => ({
-                  ...prev,
-                  subscriptionStatus: 'active'
-                }))
-                localStorage.setItem('pos_current_user', JSON.stringify({
-                  ...currentUser,
-                  subscriptionStatus: 'active'
-                }))
-                alert('Payment successful! Welcome to your POS system.')
-              }}
-              onCancel={() => {
-                setShowPaymentForm(false)
-                setClientSecret(null)
-                setSubscriptionId(null)
-                setSelectedPlan(null)
-                setIsProcessingPayment(false)
-              }}
-            />
+                Start Payment
+              </button>
+            </>
           )}
         </div>
       </div>
     )
   }
   
+  // ============================================================================
+  // TEMPORARILY DISABLED: SIGNUP/LOGIN PAGE
+  // TODO: RE-ENABLE THIS AFTER STRIPE ACCOUNT REVIEW IS COMPLETE
+  // Set ENABLE_SIGNUP_LOGIN_PAGE to true to re-enable
+  // ============================================================================
   // Show sign in/sign up page if user is not logged in
-  if (!currentUser) {
+  if (ENABLE_SIGNUP_LOGIN_PAGE && !currentUser) {
     return (
       <div className="app-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
         <div style={{ 
@@ -10860,5 +11183,6 @@ function App() {
   )
 }
 
+// Export the App component
 export default App
 
