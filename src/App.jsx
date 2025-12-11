@@ -414,7 +414,7 @@ function App() {
   // ============================================================================
   // TODO: RE-ENABLE THESE FEATURES AFTER STRIPE ACCOUNT REVIEW IS COMPLETE
   // Set both to true to re-enable signup/login and payment checkout pages
-  const ENABLE_SIGNUP_LOGIN_PAGE = false // Temporarily disabled - must re-enable later
+  const ENABLE_SIGNUP_LOGIN_PAGE = true // Re-enabled - sign in/signup flow is active
   const ENABLE_EMBEDDED_CHECKOUT_PAGE = false // Temporarily disabled - must re-enable later
   // ============================================================================
 
@@ -609,7 +609,7 @@ function App() {
     const path = pathname.split('/').filter(Boolean)[0]
     if (path === 'Settings') {
       const sectionFromURL = getSectionFromURL()
-      if (sectionFromURL && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance'].includes(sectionFromURL)) {
+      if (sectionFromURL && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'Terms and Conditions'].includes(sectionFromURL)) {
         return sectionFromURL
       }
     }
@@ -618,7 +618,7 @@ function App() {
       const stored = localStorage.getItem('pos_active_settings_section')
       if (stored) {
         const parsed = JSON.parse(stored)
-        if (['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance'].includes(parsed)) {
+        if (['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'Terms and Conditions'].includes(parsed)) {
           return parsed
         }
       }
@@ -627,6 +627,16 @@ function App() {
     }
     return 'Account'
   })
+  const [tosScrolledToBottom, setTosScrolledToBottom] = useState(false)
+  const [tosAgreed, setTosAgreed] = useState(() => {
+    try {
+      const stored = localStorage.getItem('pos_tos_agreed')
+      return stored === 'true'
+    } catch (error) {
+      return false
+    }
+  })
+  const tosContentRef = useRef(null)
   const [teamMembers, setTeamMembers] = useState(() => loadFromStorage(STORAGE_KEYS.TEAM_MEMBERS, []))
   const [weeklySchedule, setWeeklySchedule] = useState(() => {
     try {
@@ -978,7 +988,7 @@ function App() {
           // If Settings view, preserve or add section
           if (activeView === 'Settings') {
             const currentSection = getSectionFromURL()
-            if (currentSection && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance'].includes(currentSection)) {
+            if (currentSection && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'Terms and Conditions'].includes(currentSection)) {
               newURL = `/${activeView}/${encodeURIComponent(currentSection)}`
             } else {
               newURL = `/${activeView}/${encodeURIComponent(activeSettingsSection)}`
@@ -1054,7 +1064,7 @@ function App() {
       // Also restore section if Settings
       if (path === 'Settings') {
         const sectionFromURL = getSectionFromURL()
-        if (sectionFromURL && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance'].includes(sectionFromURL)) {
+        if (sectionFromURL && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'Terms and Conditions'].includes(sectionFromURL)) {
           setActiveSettingsSection(sectionFromURL)
         }
       }
@@ -1077,7 +1087,7 @@ function App() {
         // Restore section if Settings
         if (path === 'Settings') {
           const sectionFromURL = getSectionFromURL()
-          if (sectionFromURL && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance'].includes(sectionFromURL)) {
+          if (sectionFromURL && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'Terms and Conditions'].includes(sectionFromURL)) {
             setActiveSettingsSection(sectionFromURL)
           }
         }
@@ -1390,6 +1400,34 @@ function App() {
       }
     }
   }, [settings, currentUser])
+
+  // Reset scroll position when TOS section is opened
+  useEffect(() => {
+    if (activeSettingsSection === 'Terms and Conditions' && tosContentRef.current) {
+      tosContentRef.current.scrollTop = 0
+      setTosScrolledToBottom(false)
+    }
+  }, [activeSettingsSection])
+
+  // Wrapper function to handle settings section changes with TOS protection
+  const handleSettingsSectionChange = (newSection) => {
+    // If currently on TOS page and user hasn't agreed, prevent navigation
+    if (activeSettingsSection === 'Terms and Conditions' && !tosAgreed) {
+      alert('You must scroll to the bottom and click "I Agree" before you can navigate away from the Terms and Conditions page.')
+      return
+    }
+    setActiveSettingsSection(newSection)
+  }
+
+  // Prevent navigation away from TOS page via view changes
+  const handleViewChange = (newView) => {
+    // If currently on TOS page and user hasn't agreed, prevent navigation
+    if (activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed) {
+      alert('You must scroll to the bottom and click "I Agree" before you can navigate away from the Terms and Conditions page.')
+      return
+    }
+    setActiveView(newView)
+  }
 
   // Calculate total minutes worked for an employee from all timesheet entries (excluding breaks)
   const calculateTotalMinutesWorked = (employeeId) => {
@@ -3769,7 +3807,7 @@ function App() {
     }
   }
 
-  // Process product image: create a square image with the product centered and white background
+  // Process product image: crop to fill square (cover behavior) - no white padding
   const processProductImage = (file, targetSize) => {
     return new Promise((resolve, reject) => {
       const img = new Image()
@@ -3779,12 +3817,26 @@ function App() {
         img.onload = () => {
           const { width, height } = img
           
-          // Calculate the scale to fit the image within the target size while maintaining aspect ratio
-          const scale = Math.min(targetSize / width, targetSize / height, 1) // Don't upscale small images
+          // Calculate source crop region to center the subject
+          // For wide images, crop from left/right. For tall images, crop from top/bottom
+          let sourceX = 0
+          let sourceY = 0
+          let sourceWidth = width
+          let sourceHeight = height
           
-          // Calculate new dimensions
-          const newWidth = Math.round(width * scale)
-          const newHeight = Math.round(height * scale)
+          // If image is wider than it is tall, crop horizontally to square
+          if (width > height) {
+            const squareSize = height
+            sourceX = (width - squareSize) / 2
+            sourceWidth = squareSize
+          } 
+          // If image is taller than it is wide, crop vertically to square
+          else if (height > width) {
+            const squareSize = width
+            sourceY = (height - squareSize) / 2
+            sourceHeight = squareSize
+          }
+          // If already square, use as-is
           
           // Create a SQUARE canvas
           const canvas = document.createElement('canvas')
@@ -3792,18 +3844,18 @@ function App() {
           canvas.height = targetSize
           const ctx = canvas.getContext('2d')
 
-          // Fill entire canvas with white background
-          ctx.fillStyle = '#FFFFFF'
-          ctx.fillRect(0, 0, targetSize, targetSize)
+          // Draw the cropped image to fill the entire square
+          // This will: 
+          // - Crop wide/tall images to square (removes excess)
+          // - Shrink large images to fit targetSize
+          // - Upscale small images to fill targetSize (if needed)
+          ctx.drawImage(
+            img,
+            sourceX, sourceY, sourceWidth, sourceHeight, // Source crop (square region)
+            0, 0, targetSize, targetSize // Destination: fill entire square
+          )
 
-          // Calculate position to center the image in the square
-          const x = Math.round((targetSize - newWidth) / 2)
-          const y = Math.round((targetSize - newHeight) / 2)
-
-          // Draw the image centered on the white background
-          ctx.drawImage(img, x, y, newWidth, newHeight)
-
-          // Convert to JPEG blob (JPEG doesn't support transparency, ensuring white background)
+          // Convert to JPEG blob
           canvas.toBlob(
             (blob) => {
               if (blob) {
@@ -5932,7 +5984,9 @@ function App() {
                 </button>
                 <button 
                   className={`nav-footer-btn ${activeView === null ? 'active' : ''}`}
-                  onClick={() => setActiveView(null)}
+                  onClick={() => handleViewChange(null)}
+                  disabled={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                  style={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
@@ -5942,7 +5996,9 @@ function App() {
                 </button>
                 <button 
                   className={`nav-footer-btn ${activeView === 'Transaction' ? 'active' : ''}`}
-                  onClick={() => setActiveView('Transaction')}
+                  onClick={() => handleViewChange('Transaction')}
+                  disabled={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                  style={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
@@ -5952,7 +6008,9 @@ function App() {
                 </button>
                 <button 
                   className={`nav-footer-btn ${activeView === 'Timesheets' ? 'active' : ''}`}
-                  onClick={() => setActiveView('Timesheets')}
+                  onClick={() => handleViewChange('Timesheets')}
+                  disabled={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                  style={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -5965,7 +6023,9 @@ function App() {
                 </button>
                 <button 
                   className={`nav-footer-btn ${activeView === 'Settings' ? 'active' : ''}`}
-                  onClick={() => setActiveView('Settings')}
+                  onClick={() => handleViewChange('Settings')}
+                  disabled={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                  style={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
@@ -6529,7 +6589,9 @@ function App() {
                 </button>
                 <button 
                   className={`nav-footer-btn ${activeView === null ? 'active' : ''}`}
-                  onClick={() => setActiveView(null)}
+                  onClick={() => handleViewChange(null)}
+                  disabled={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                  style={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
@@ -6539,7 +6601,9 @@ function App() {
                 </button>
                 <button 
                   className={`nav-footer-btn ${activeView === 'Transaction' ? 'active' : ''}`}
-                  onClick={() => setActiveView('Transaction')}
+                  onClick={() => handleViewChange('Transaction')}
+                  disabled={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                  style={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
@@ -6549,7 +6613,9 @@ function App() {
                 </button>
                 <button 
                   className={`nav-footer-btn ${activeView === 'Timesheets' ? 'active' : ''}`}
-                  onClick={() => setActiveView('Timesheets')}
+                  onClick={() => handleViewChange('Timesheets')}
+                  disabled={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                  style={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -6562,7 +6628,9 @@ function App() {
                 </button>
                 <button 
                   className={`nav-footer-btn ${activeView === 'Settings' ? 'active' : ''}`}
-                  onClick={() => setActiveView('Settings')}
+                  onClick={() => handleViewChange('Settings')}
+                  disabled={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                  style={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
@@ -6580,24 +6648,27 @@ function App() {
             {/* Settings Content Wrapper - Sidebar and Main Content */}
             <div className="settings-content-wrapper" style={{ display: 'flex', flexDirection: 'row', flex: 1, minHeight: 0, position: 'relative', overflow: 'visible' }}>
               {/* Settings Sidebar */}
-              <div className="settings-sidebar" style={{ width: '250px', flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: '2px solid #c0c0c0', backgroundColor: '#ffffff', position: 'relative', zIndex: 1 }}>
+              <div className="settings-sidebar" style={{ width: '320px', flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: '2px solid #c0c0c0', backgroundColor: '#ffffff', position: 'relative', zIndex: 1 }}>
                 <div className="settings-sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <button
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Account' ? 'active' : ''}`}
-                    onClick={() => setActiveSettingsSection('Account')}
+                    onClick={() => handleSettingsSectionChange('Account')}
+                    disabled={activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                    style={activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="12" cy="12" r="10"></circle>
-                      <line x1="12" y1="16" x2="12" y2="12"></line>
-                      <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                      <circle cx="12" cy="7" r="4"></circle>
                     </svg>
                     <span>Account</span>
                   </button>
                   <button
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Team members' ? 'active' : ''}`}
-                    onClick={() => setActiveSettingsSection('Team members')}
+                    onClick={() => handleSettingsSectionChange('Team members')}
+                    disabled={activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                    style={activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
                       <circle cx="9" cy="7" r="4"></circle>
                       <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
@@ -6607,9 +6678,11 @@ function App() {
                   </button>
                   <button
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Schedule' ? 'active' : ''}`}
-                    onClick={() => setActiveSettingsSection('Schedule')}
+                    onClick={() => handleSettingsSectionChange('Schedule')}
+                    disabled={activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                    style={activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
                       <line x1="16" y1="2" x2="16" y2="6"></line>
                       <line x1="8" y1="2" x2="8" y2="6"></line>
@@ -6619,39 +6692,53 @@ function App() {
                   </button>
                   <button
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Edit time-sheets' ? 'active' : ''}`}
-                    onClick={() => setActiveSettingsSection('Edit time-sheets')}
+                    onClick={() => handleSettingsSectionChange('Edit time-sheets')}
+                    disabled={activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                    style={activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <polyline points="12 6 12 12 16 14"></polyline>
                     </svg>
                     <span>Edit time-sheets</span>
                   </button>
                   <button
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Payroll' ? 'active' : ''}`}
-                    onClick={() => setActiveSettingsSection('Payroll')}
+                    onClick={() => handleSettingsSectionChange('Payroll')}
+                    disabled={activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                    style={activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
-                      <line x1="1" y1="10" x2="23" y2="10"></line>
-                      <path d="M12 15h.01"></path>
-                      <path d="M17 15h.01"></path>
-                      <path d="M7 15h.01"></path>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="12" y1="1" x2="12" y2="23"></line>
+                      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
                     </svg>
                     <span>Payroll</span>
                   </button>
                   <button
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Compliance' ? 'active' : ''}`}
-                    onClick={() => setActiveSettingsSection('Compliance')}
+                    onClick={() => handleSettingsSectionChange('Compliance')}
+                    disabled={activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                    style={activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
                       <path d="M9 12l2 2 4-4"></path>
-                      <path d="M21 12c-1 0-3-1-3-3s2-3 3-3 3 1 3 3-2 3-3 3"></path>
-                      <path d="M3 12c1 0 3-1 3-3s-2-3-3-3-3 1-3 3 2 3 3 3"></path>
-                      <path d="M12 21c-1 0-3-1-3-3s2-3 3-3 3 1 3 3-2 3-3 3"></path>
-                      <path d="M12 3c-1 0-3-1-3-3s2-3 3-3 3 1 3 3-2 3-3 3"></path>
                     </svg>
                     <span>Compliance</span>
+                  </button>
+                  <button
+                    className={`settings-sidebar-btn ${activeSettingsSection === 'Terms and Conditions' ? 'active' : ''}`}
+                    onClick={() => handleSettingsSectionChange('Terms and Conditions')}
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                      <line x1="16" y1="13" x2="8" y2="13"></line>
+                      <line x1="16" y1="17" x2="8" y2="17"></line>
+                      <line x1="10" y1="9" x2="8" y2="9"></line>
+                      <line x1="16" y1="9" x2="12" y2="9"></line>
+                    </svg>
+                    <span>Terms and Conditions</span>
                   </button>
                 </div>
               </div>
@@ -8645,6 +8732,337 @@ function App() {
                     </div>
                   </div>
                   )}
+                  
+                  {activeSettingsSection === 'Terms and Conditions' && (
+                  <div className="tos-view" style={{ 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    height: '100%', 
+                    maxWidth: '900px', 
+                    margin: '0 auto',
+                    padding: '2rem'
+                  }}>
+                    {!tosAgreed && (
+                      <div style={{
+                        padding: '1rem',
+                        backgroundColor: '#fff3cd',
+                        border: '2px solid #ffc107',
+                        borderRadius: '8px',
+                        marginBottom: '1.5rem',
+                        color: '#856404',
+                        fontWeight: '600'
+                      }}>
+                        ⚠️ You must scroll to the bottom and click "I Agree" before you can navigate away from this page.
+                      </div>
+                    )}
+                    <h2 style={{ marginBottom: '2rem', fontSize: '1.5rem', fontWeight: '600', color: '#1e3a5f' }}>Terms and Conditions</h2>
+                    
+                    <div 
+                      ref={tosContentRef}
+                      className="tos-content"
+                      onScroll={(e) => {
+                        const element = e.target
+                        const isAtBottom = element.scrollHeight - element.scrollTop <= element.clientHeight + 10
+                        setTosScrolledToBottom(isAtBottom)
+                      }}
+                      style={{
+                        flex: 1,
+                        overflowY: 'auto',
+                        padding: '1.5rem',
+                        backgroundColor: '#ffffff',
+                        border: '2px solid #e0e0e0',
+                        borderRadius: '8px',
+                        marginBottom: '2rem',
+                        lineHeight: '1.6',
+                        fontSize: '0.95rem',
+                        color: '#333'
+                      }}
+                    >
+                      <div style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
+{`OMNI SOLUTIONS – MERCHANT TERMS OF SERVICE
+
+(POS SOFTWARE/HARDWARE WITH STRIPE – DELAWARE GOVERNING LAW)
+
+Last updated: December 10, 2025
+
+These Merchant Terms of Service ("Terms") form a binding agreement between Omni Solutions, a Delaware corporation ("Company," "we," "us," or "our"), and the business entity or individual accepting these Terms ("Merchant," "you," or "your").
+
+By (a) clicking "I Agree," "Accept," or similar; (b) signing an order form or merchant agreement that references these Terms; or (c) accessing or using any of the Services (defined below), you agree to be bound by these Terms. If you do not agree, you may not use the Services.
+
+1. Definitions
+
+For purposes of these Terms:
+
+"Services" means Company's point-of-sale ("POS") software, merchant dashboard, APIs, back-office tools, and any related services we make available for you to manage sales, orders, inventory, employees, and reporting.
+
+"Hardware" means any POS terminals, card readers, printers, tablets, or other physical devices we provide, sell, or lease to you.
+
+"Fiat Payments" means payments denominated in government-issued currency (for example, U.S. dollars) made by card, ACH, bank transfer, or similar traditional rails.
+
+"Crypto Payments" means payments made using virtual or digital currency (including cryptocurrency and stablecoins) that is not legal tender in the United States.
+
+"Stripe" means Stripe, Inc., Stripe Payments Company, and/or their affiliated entities that provide payment processing services.
+
+"Stripe Services" means payment processing, settlement, payouts, and any other financial services provided by Stripe under the Stripe Services Agreement, Stripe Payments Company Terms, and any other Stripe terms that apply.
+
+"Order Form" means any ordering document, statement of work, or online subscription flow that references these Terms and sets out commercial details such as fees, term, Hardware, and Service tier.
+
+2. Scope of Services; Our Role vs. Stripe's Role
+
+2.1 Our Role: POS Platform Only.
+
+We provide a POS platform and related Hardware that enable you to manage orders and present payment options to your customers. The Services may display prices, send payment instructions to Stripe, and show you reports regarding your transactions.
+
+2.2 Stripe as Payment Processor.
+
+All payment processing for Fiat Payments and Crypto Payments (to the extent supported) made through the Services is performed exclusively by Stripe, not by Company. Stripe is responsible for authorizing, settling, and transmitting funds (including any supported crypto) to you, subject to its own terms and legal obligations. We do not receive, hold, or transmit your customers' funds.
+
+2.3 No Banking, Custody, or Money Transmission by Company.
+
+Company is not a bank, money transmitter, trust company, or investment advisor. We do not hold deposits, provide custody of fiat or virtual currency, or move funds on behalf of you or your customers. Any bank, money transmitter, or similar regulated activity is performed by Stripe (or its regulated affiliates), not by us.
+
+2.4 Availability of Crypto Payments.
+
+Availability of Crypto Payments, supported digital assets, networks, and conversion options is determined by Stripe and may change at any time. We do not guarantee that any particular digital asset or blockchain network will be supported at any given time.
+
+3. Relationship with Stripe
+
+3.1 Separate Agreement with Stripe.
+
+To use payment functionality in connection with the Services, you must create and maintain a valid Stripe account and enter into a direct agreement with Stripe (the "Stripe Services Agreement" and any applicable Stripe Payments Company Terms, collectively, the "Stripe Terms"). Those Stripe Terms are an agreement solely between you and Stripe.
+
+3.2 Incorporation by Reference.
+
+By enabling payment acceptance through the Services, you (a) confirm that you have read and understood the Stripe Terms, and (b) agree that your use of payment functionality through the Services is subject to the Stripe Terms as they may be modified by Stripe from time to time.
+
+3.3 Stripe Controls the Flow of Funds.
+
+Stripe independently controls: (a) whether a transaction is approved or declined; (b) when funds are credited or debited; (c) when and how payouts are made; and (d) any holds, reserves, chargebacks, or reversals. We are not responsible for Stripe's decisions, actions, or omissions, and we do not have access to or control over funds processed by Stripe.
+
+3.4 Information Sharing with Stripe.
+
+You authorize us to share with Stripe the information reasonably necessary for Stripe to provide its services (including business identification information, transaction data, and your contact information), and you authorize Stripe to share with us information Stripe reasonably determines we need to operate the Services and support you.
+
+3.5 Stripe Fees and Compliance.
+
+Stripe may charge you processing fees or other charges under the Stripe Terms. Those fees are separate from, and in addition to, the subscription and other fees you owe us under these Terms. You are solely responsible for complying with the Stripe Terms and any actions taken by Stripe in connection with your Stripe account.
+
+4. Eligibility, Onboarding, and Merchant Responsibilities
+
+4.1 Business Use Only.
+
+The Services are intended for business and commercial use only and are not intended for personal, family, or household purposes. You represent that you are acting on behalf of a business and have authority to bind that business.
+
+4.2 Information You Provide.
+
+You agree to provide accurate and complete information about your business, beneficial owners, controllers, and authorized users, and to promptly update this information if it changes. We and Stripe may use this information for identity verification, fraud prevention, sanctions and anti-money laundering (AML) screening, and other compliance purposes.
+
+4.3 Compliance with Law.
+
+You are solely responsible for ensuring that your use of the Services and Stripe Services complies with all applicable laws, rules, and regulations, including, without limitation:
+
+U.S. federal law (including anti-money laundering, sanctions, consumer protection, and tax laws);
+
+The laws of each state in which you operate or where your customers are located (including Delaware law if you are formed, headquartered, or operating in Delaware); and
+
+Any licensing or registration requirements that may apply to your own business activities.
+
+4.4 Your Customers.
+
+You are responsible for your relationship with your customers, including pricing, refunds, returns, cancellations, customer service, and any obligations under consumer protection laws. We are not a party to any transaction between you and your customers.
+
+5. Subscription, Fees, and Billing
+
+5.1 Subscription to Services.
+
+Use of the Services may require a paid subscription as described in the applicable Order Form or in-app plan description.
+
+5.2 Subscription Billing via Stripe.
+
+You agree that all subscription fees and other amounts owed to us under these Terms may be billed and collected through Stripe. By providing a payment method during signup, you authorize Stripe to charge that payment method (or any replacement method) for the full amount of fees due to us, in accordance with the billing schedule specified in your plan.
+
+5.3 Non-Refundable Fees.
+
+Except as expressly provided in an Order Form or required by applicable law, all fees are non-refundable, including if you cancel or stop using the Services before the end of a billing period.
+
+5.4 Taxes.
+
+You are responsible for all taxes, levies, and duties associated with your use of the Services and your sales to customers, excluding taxes imposed on our income.
+
+6. Crypto-Specific Disclaimers
+
+6.1 Nature of Virtual Currency.
+
+You acknowledge that Crypto Payments involve virtual currency, which is a digital representation of value that is not legal tender and is not issued or backed by the U.S. government or any other government. Its value can be extremely volatile and may go to zero.
+
+6.2 No Guarantee of Value or Liquidity.
+
+We do not guarantee the value of any digital asset, the availability of any trading pair, or your ability to convert between crypto and fiat. Any conversion, settlement, or liquidation of Crypto Payments is handled by Stripe (or other providers Stripe designates) under the Stripe Terms.
+
+6.3 No FDIC or SIPC Insurance.
+
+Funds or digital assets processed through Stripe may not be covered by FDIC, SIPC, or similar protections. You are responsible for understanding Stripe's disclosures and risk factors relating to crypto and other payment methods.
+
+7. Hardware; Software License
+
+7.1 Hardware.
+
+Any Hardware we sell or lease to you is provided for use with the Services. Title to leased Hardware remains with us or our lessors. You agree to use the Hardware only as intended, keep it in reasonable condition, and comply with any instructions and safety guidelines we provide.
+
+7.2 Software License.
+
+Subject to your continued compliance with these Terms, we grant you a limited, non-exclusive, non-transferable, revocable license to install and use our software (including any apps) solely for your internal business use in connection with the Services.
+
+7.3 Restrictions.
+
+You may not (and may not permit any third party to): (a) reverse engineer, decompile, or attempt to derive source code from the Services; (b) circumvent security measures; (c) resell or sublicense the Services to others (other than your authorized locations or franchisees expressly permitted in writing by us); or (d) use the Services for any illegal purpose.
+
+8. Prohibited Activities
+
+You may not use the Services or Stripe Services in connection with any activity that is prohibited by (a) these Terms, (b) the Stripe Terms, or (c) applicable law. This may include, without limitation, activities involving unlawful gambling, sanctions violations, money laundering, terrorist financing, fraud, or other high-risk activities as determined by us or Stripe.
+
+We and/or Stripe may suspend or terminate your access to payment functionality or to the Services if we reasonably believe you are engaged in a prohibited activity or present an unacceptable risk.
+
+9. Data, Privacy, and Security
+
+9.1 Your Data.
+
+You retain ownership of the business data you upload to or generate through the Services ("Merchant Data"). You grant us a non-exclusive license to use, reproduce, and process Merchant Data as necessary to provide and improve the Services, comply with law, and prevent fraud or abuse.
+
+9.2 Cardholder and Customer Data.
+
+Card data and other customer payment information you collect through the Services is processed and stored by Stripe. You agree not to store full card numbers, CVV codes, or other sensitive authentication data on your own systems unless expressly permitted by Stripe and applicable PCI-DSS standards.
+
+9.3 Privacy Policy.
+
+Our separate Privacy Policy describes how we collect, use, and disclose personal data. By using the Services, you consent to our privacy practices as described in that policy.
+
+10. Disclaimers; Limitation of Liability
+
+10.1 "AS IS" Basis.
+
+To the maximum extent permitted by law, the Services and Hardware are provided "AS IS" and "AS AVAILABLE," without warranties of any kind, whether express, implied, or statutory, including implied warranties of merchantability, fitness for a particular purpose, and non-infringement.
+
+10.2 No Responsibility for Stripe or Third Parties.
+
+We are not responsible for Stripe, any bank, or any other third-party service provider. We do not guarantee that Stripe or other third parties will be available, error-free, or free from security incidents, nor do we control their acts or omissions.
+
+10.3 Limitation of Liability.
+
+To the maximum extent permitted by law, in no event will our total liability arising out of or relating to these Terms, the Services, or the Hardware exceed the greater of (a) the amount of fees you paid to us for the Services during the twelve (12) months immediately preceding the event giving rise to liability, or (b) one thousand U.S. dollars (US $1,000). We will not be liable for any indirect, incidental, consequential, special, or punitive damages, or loss of profits, revenue, or data.
+
+Some jurisdictions do not allow certain disclaimers or limitations; in those jurisdictions, these provisions apply only to the extent permitted by law.
+
+11. Indemnification
+
+You agree to indemnify, defend, and hold harmless Company and its officers, directors, employees, and agents from and against all claims, damages, losses, costs, and expenses (including reasonable attorneys' fees) arising out of or related to: (a) your use of the Services or Hardware; (b) your relationship with your customers; (c) your breach of these Terms; (d) your violation of the Stripe Terms; or (e) your violation of applicable law.
+
+12. Term, Suspension, and Termination
+
+12.1 Term.
+
+These Terms take effect when you first accept them or start using the Services and continue until terminated as provided here.
+
+12.2 Suspension.
+
+We may temporarily suspend or limit your access to the Services if we reasonably believe (a) you have breached these Terms; (b) your account has been compromised; (c) your use poses a security or fraud risk; or (d) suspension is required by law or requested by Stripe or another partner.
+
+12.3 Termination.
+
+Either party may terminate these Terms for any reason upon thirty (30) days' written notice. We may also terminate immediately upon notice if you materially breach these Terms and fail to cure within a reasonable period, or if Stripe closes or restricts your Stripe account in a way that prevents you from using payment functionality through the Services.
+
+12.4 Effect of Termination.
+
+Upon termination, (a) your right to use the Services and licensed software will cease; (b) you must stop using the Services; and (c) any fees owed to us will become immediately due and payable. Sections that by their nature should survive (including payment obligations, disclaimers, limitations of liability, and indemnities) will survive termination.
+
+13. Governing Law; Disputes
+
+These Terms are governed by the laws of the State of Delaware, without regard to its conflict of laws rules. Any dispute arising out of or relating to these Terms or the Services will be resolved in the state or federal courts located in Kent County, Delaware, and each party irrevocably submits to the personal jurisdiction of those courts.
+
+[Optional: An arbitration clause may be added or substituted here. Consult legal counsel to customize.]
+
+14. Miscellaneous
+
+14.1 Changes to Terms or Services.
+
+We may update these Terms from time to time. When we do, we will update the "Last updated" date above and may provide additional notice as required by law. Your continued use of the Services after changes become effective constitutes your acceptance of the updated Terms.
+
+14.2 Independent Contractors.
+
+The parties are independent contractors. These Terms do not create any partnership, joint venture, or agency relationship between you and us. Stripe is an independent third-party provider and is not our agent for any purpose other than as specified in the Stripe Terms.
+
+14.3 Assignment.
+
+You may not assign or transfer these Terms or your rights or obligations under them without our prior written consent. We may assign these Terms in connection with a merger, acquisition, corporate reorganization, or sale of all or substantially all of our assets, or by operation of law.
+
+14.4 Entire Agreement.
+
+These Terms, together with any Order Form and our Privacy Policy, constitute the entire agreement between you and us with respect to the Services and supersede all prior or contemporaneous understandings and agreements.
+
+14.5 Severability.
+
+If any provision of these Terms is found to be invalid or unenforceable, the remaining provisions will remain in full force and effect.
+
+14.6 Contact Information.
+
+If you have questions about these Terms or the Services, you may contact us at:
+
+Omni Solutions
+Email: contact@omnisolutions.us
+
+Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
+                      </div>
+                    </div>
+                    
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'center', 
+                      padding: '1rem',
+                      borderTop: '2px solid #e0e0e0',
+                      backgroundColor: '#f8f9fa'
+                    }}>
+                      <button
+                        onClick={() => {
+                          if (tosScrolledToBottom) {
+                            setTosAgreed(true)
+                            localStorage.setItem('pos_tos_agreed', 'true')
+                            // After agreeing, allow navigation
+                            setActiveSettingsSection('Account')
+                          }
+                        }}
+                        disabled={!tosScrolledToBottom}
+                        style={{
+                          padding: '0.75rem 3rem',
+                          fontSize: '1.1rem',
+                          fontWeight: '700',
+                          backgroundColor: tosScrolledToBottom ? '#1e3a5f' : '#cccccc',
+                          color: tosScrolledToBottom ? 'white' : '#888888',
+                          border: 'none',
+                          borderRadius: '8px',
+                          cursor: tosScrolledToBottom ? 'pointer' : 'not-allowed',
+                          transition: 'all 0.2s',
+                          boxShadow: tosScrolledToBottom ? '0 4px 8px rgba(30, 58, 95, 0.3)' : 'none'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (tosScrolledToBottom) {
+                            e.target.style.backgroundColor = '#2a4f7a'
+                            e.target.style.transform = 'translateY(-2px)'
+                            e.target.style.boxShadow = '0 6px 12px rgba(30, 58, 95, 0.4)'
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (tosScrolledToBottom) {
+                            e.target.style.backgroundColor = '#1e3a5f'
+                            e.target.style.transform = 'translateY(0)'
+                            e.target.style.boxShadow = '0 4px 8px rgba(30, 58, 95, 0.3)'
+                          }
+                        }}
+                      >
+                        {tosScrolledToBottom ? 'I Agree' : 'Please scroll to the bottom to agree'}
+                      </button>
+                    </div>
+                  </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -8665,7 +9083,9 @@ function App() {
                 </button>
                 <button 
                   className={`nav-footer-btn ${activeView === null ? 'active' : ''}`}
-                  onClick={() => setActiveView(null)}
+                  onClick={() => handleViewChange(null)}
+                  disabled={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                  style={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
@@ -8675,7 +9095,9 @@ function App() {
                 </button>
                 <button 
                   className={`nav-footer-btn ${activeView === 'Transaction' ? 'active' : ''}`}
-                  onClick={() => setActiveView('Transaction')}
+                  onClick={() => handleViewChange('Transaction')}
+                  disabled={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                  style={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
@@ -8685,7 +9107,9 @@ function App() {
                 </button>
                 <button 
                   className={`nav-footer-btn ${activeView === 'Timesheets' ? 'active' : ''}`}
-                  onClick={() => setActiveView('Timesheets')}
+                  onClick={() => handleViewChange('Timesheets')}
+                  disabled={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                  style={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -8698,7 +9122,9 @@ function App() {
                 </button>
                 <button 
                   className={`nav-footer-btn ${activeView === 'Settings' ? 'active' : ''}`}
-                  onClick={() => setActiveView('Settings')}
+                  onClick={() => handleViewChange('Settings')}
+                  disabled={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                  style={activeView === 'Settings' && activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
@@ -9042,7 +9468,7 @@ function App() {
         {/* Edit Product Modal */}
         {isEditModalOpen && (editingProductId || isAddingProduct) && (
           <div className="modal-overlay" onClick={cancelEditing}>
-            <div className={`modal-content ${activeEditSection === 'toppings' ? 'modal-wide' : ''}`} onClick={(e) => e.stopPropagation()}>
+            <div className={`modal-content ${activeEditSection === 'toppings' ? 'modal-wide' : ''} ${activeEditSection === 'details' || activeEditSection === 'ingredients' ? 'modal-tall' : ''}`} onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
                 <h2>{isAddingProduct ? 'Add Product' : 'Edit Product'}</h2>
                 <button className="modal-close-btn" onClick={cancelEditing}>
@@ -9075,7 +9501,7 @@ function App() {
                   Ingredients
                 </button>
               </div>
-              <div className="modal-body">
+              <div className={`modal-body ${activeEditSection === 'details' || activeEditSection === 'ingredients' ? 'modal-body-tall' : ''}`}>
                 <div className="product-edit-form">
                   {activeEditSection === 'details' && (
                     <>
@@ -9630,7 +10056,7 @@ function App() {
         {/* Category Edit Modal */}
         {isCategoryModalOpen && (
           <div className="modal-overlay" onClick={() => setIsCategoryModalOpen(false)}>
-            <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-content modal-category" onClick={(e) => e.stopPropagation()}>
               <div className="modal-header">
                 <h2>Edit Item Sections</h2>
                 <button className="modal-close-btn" onClick={() => setIsCategoryModalOpen(false)}>
