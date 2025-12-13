@@ -1,0 +1,36 @@
+/* ScaleToFit - Force desktop layout always (disable responsive breakpoints) */
+
+/* Account Settings - Force desktop layout (prevent responsive stacking) */
+.scale-to-fit-canvas .account-settings-grid {
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+}
+
+.scale-to-fit-canvas .account-info-columns {
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+}
+
+.scale-to-fit-canvas .settings-content-wrapper {
+  flex-direction: row !important;
+}
+
+.scale-to-fit-canvas .settings-row {
+  grid-template-columns: repeat(3, 1fr) !important;
+}
+
+.scale-to-fit-canvas .settings-row:last-child {
+  grid-template-columns: repeat(2, 1fr) !important;
+}
+
+/* Main content should always be row layout */
+.scale-to-fit-canvas .main-content {
+  flex-direction: row !important;
+}
+
+/* Prevent any responsive transforms/scaling inside */
+.scale-to-fit-canvas .account-settings-container {
+  transform: none !important;
+  margin-left: 0 !important;
+}
+

@@ -1,8 +1,10 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { BrowserRouter } from 'react-router-dom'
 import { loadStripe } from '@stripe/stripe-js'
 import { Elements } from '@stripe/react-stripe-js'
 import App from './App.jsx'
+import DesktopScaledFrame from './DesktopScaledFrame.jsx'
 import './index.css'
 
 // App wrapper component to handle Stripe initialization
@@ -38,33 +40,46 @@ const AppWrapper = () => {
     initializeStripe();
   }, []);
   
-  if (loading) {
+  // Check if we're in embed mode
+  const params = new URLSearchParams(window.location.search)
+  const isEmbed = params.get('embed') === '1'
+  
+  // If in embed mode, render app directly (it's inside iframe)
+  // Otherwise, wrap in DesktopScaledFrame which creates the iframe
+  if (isEmbed) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        flexDirection: 'column',
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '100vh',
-        gap: '1rem'
-      }}>
-        <div>Loading...</div>
-        <div style={{ fontSize: '0.875rem', color: '#666' }}>Initializing payment system...</div>
-      </div>
-    );
+      <Elements stripe={stripePromise}>
+        {loading ? (
+          <div style={{ 
+            display: 'flex', 
+            flexDirection: 'column',
+            justifyContent: 'center', 
+            alignItems: 'center', 
+            height: '100vh',
+            gap: '1rem',
+            width: '100%'
+          }}>
+            <div>Loading...</div>
+            <div style={{ fontSize: '0.875rem', color: '#666' }}>Initializing payment system...</div>
+          </div>
+        ) : (
+          <App />
+        )}
+      </Elements>
+    )
   }
   
-  // Continue even if Stripe fails - app will work without payment features
-  return (
-    <Elements stripe={stripePromise}>
-      <App />
-    </Elements>
-  );
+  // Normal mode: wrap in DesktopScaledFrame (creates iframe with fixed viewport)
+  return <DesktopScaledFrame />
 };
 
-ReactDOM.createRoot(document.getElementById('root')).render(
+const rootElement = document.getElementById('root')
+
+ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <AppWrapper />
+    <BrowserRouter>
+      <AppWrapper />
+    </BrowserRouter>
   </React.StrictMode>,
 )
 

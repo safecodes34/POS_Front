@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import './App.css'
 import axios from 'axios'
 import { loadStripeTerminal } from '@stripe/terminal-js'
 import { PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
+import { usePostEmbedHeight } from './usePostEmbedHeight'
+import { useFooterHeightVar } from './useFooterHeightVar'
 
 // Sample product data
 const initialProducts = []
@@ -13,22 +16,112 @@ const initialCategories = ['All']
 // Check for production mode or Vercel deployment - always use production URL when on Vercel
 const getIsProduction = () => {
   if (typeof window === 'undefined') return false
+  
+  // Check if we're on a local network IP (192.168.x.x, 10.x.x.x, 172.16-31.x.x, or localhost)
+  const hostname = window.location.hostname
+  const isLocalNetwork = 
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    /^192\.168\.\d+\.\d+$/.test(hostname) ||
+    /^10\.\d+\.\d+\.\d+$/.test(hostname) ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/.test(hostname)
+  
+  // If we're on a local network, we're NOT in production
+  if (isLocalNetwork) {
+    return false
+  }
+  
+  // Otherwise, check if we're on Vercel or Railway
   return import.meta.env.PROD || 
     import.meta.env.MODE === 'production' || 
-    window.location.hostname.includes('vercel.app') ||
-    window.location.hostname.includes('railway.app')
+    hostname.includes('vercel.app') ||
+    hostname.includes('railway.app')
 }
 
 const isProduction = getIsProduction()
-// Always use hardcoded production URL when deployed - ignore env vars that might be incorrect
-const API_BASE_URL = isProduction
-  ? 'https://posback-production-2407.up.railway.app/api'
-  : (import.meta.env.VITE_API_BASE_URL || 'https://localhost:4001/api')
-const IMAGE_BASE_URL = import.meta.env.VITE_IMAGE_BASE_URL || (isProduction ? 'https://posback-production-2407.up.railway.app' : 'https://localhost:4001')
+
+// Detect backend URL based on current hostname for network access
+const getBackendUrl = () => {
+  // Always check window.location first (runtime detection is more reliable)
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname
+    const port = window.location.port || '3001'
+    
+    // Check if we're on a local network IP (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+    const isLocalNetworkIP = 
+      /^192\.168\.\d+\.\d+$/.test(hostname) ||
+      /^10\.\d+\.\d+\.\d+$/.test(hostname) ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/.test(hostname)
+    
+    // If accessed via network IP, ALWAYS use that IP for backend (even if isProduction is true)
+    if (isLocalNetworkIP) {
+      const backendUrl = `https://${hostname}:4001`
+      console.log('🌐 Network IP access detected!')
+      console.log('   Frontend hostname:', hostname)
+      console.log('   Frontend port:', port)
+      console.log('   Backend URL:', backendUrl)
+      console.log('   ⚠️  Overriding production mode for local network access')
+      return backendUrl
+    }
+    
+    // If accessed via localhost, use localhost backend
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      console.log('🏠 Localhost access detected')
+      console.log('   Using backend: https://localhost:4001')
+      return 'https://localhost:4001'
+    }
+  }
+  
+  // Only use production backend if we're actually in production AND not on local network
+  if (isProduction) {
+    return 'https://posback-production-2407.up.railway.app'
+  }
+  
+  // Check if we have an environment variable override
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL.replace('/api', '')
+  }
+  
+  // Default to localhost for local development (only if window is undefined, like SSR)
+  return 'https://localhost:4001'
+}
+
+const BACKEND_BASE_URL = getBackendUrl()
+const API_BASE_URL = `${BACKEND_BASE_URL}/api`
+const IMAGE_BASE_URL = import.meta.env.VITE_IMAGE_BASE_URL || BACKEND_BASE_URL
 
 // Log for debugging
 if (typeof window !== 'undefined') {
-  console.log('🔗 API Base URL:', API_BASE_URL, '| Production:', isProduction, '| Hostname:', window.location.hostname)
+  console.log('═══════════════════════════════════════')
+  console.log('🔗 API Configuration:')
+  console.log('   API Base URL:', API_BASE_URL)
+  console.log('   Backend Base URL:', BACKEND_BASE_URL)
+  console.log('   Image Base URL:', IMAGE_BASE_URL)
+  console.log('   Production Mode:', isProduction)
+  console.log('   Current Hostname:', window.location.hostname)
+  console.log('   Current Port:', window.location.port)
+  console.log('   Full URL:', window.location.href)
+  console.log('═══════════════════════════════════════')
+  
+  // Warn if using wrong backend URL
+  if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    if (BACKEND_BASE_URL.includes('localhost')) {
+      console.error('⚠️ WARNING: Frontend accessed via network IP but backend URL is localhost!')
+      console.error('   This will not work from another device.')
+      console.error('   Frontend hostname:', window.location.hostname)
+      console.error('   Backend URL:', BACKEND_BASE_URL)
+      console.error('   Expected backend URL:', `https://${window.location.hostname}:4001`)
+    } else if (BACKEND_BASE_URL.includes('railway.app') || BACKEND_BASE_URL.includes('vercel.app')) {
+      console.error('⚠️ WARNING: Frontend accessed via network IP but backend URL is production!')
+      console.error('   This will not work - production backend blocks local network origins.')
+      console.error('   Frontend hostname:', window.location.hostname)
+      console.error('   Backend URL:', BACKEND_BASE_URL)
+      console.error('   Expected backend URL:', `https://${window.location.hostname}:4001`)
+      console.error('   Fix: Restart frontend to clear production mode detection')
+    } else {
+      console.log('✅ Network access detected - backend URL matches frontend hostname')
+    }
+  }
 }
 
 // LocalStorage keys
@@ -87,7 +180,7 @@ const PaymentFormModal = ({ clientSecret, subscriptionId, selectedPlan, plans, o
         elements,
         clientSecret,
         confirmParams: {
-          return_url: window.location.origin + window.location.pathname,
+          return_url: window.location.origin + location.pathname,
         },
         redirect: 'if_required'
       })
@@ -301,6 +394,19 @@ const categorizeToppings = (toppings) => {
 }
 
 function App() {
+  // React Router hooks
+  const navigate = useNavigate()
+  const location = useLocation()
+  
+  // Check if we're in embed mode (inside iframe)
+  const isEmbed = new URLSearchParams(location.search).get('embed') === '1'
+  
+  // Post height to parent window when embedded
+  usePostEmbedHeight(isEmbed)
+  
+  // Dynamically measure footer height and set CSS variable
+  useFooterHeightVar()
+  
   // Load initial state from localStorage
   const loadFromStorage = (key, defaultValue) => {
     try {
@@ -314,7 +420,7 @@ function App() {
 
   // Helper function to get section from URL
   const getSectionFromURL = () => {
-    const pathname = window.location.pathname
+    const pathname = location.pathname
     const segments = pathname.split('/').filter(Boolean)
     if (segments.length >= 2 && segments[0] === 'Settings') {
       // Decode URL-encoded section name (handles spaces like "Team members")
@@ -330,15 +436,34 @@ function App() {
 
   // Helper function to get category from URL query params
   const getCategoryFromURL = () => {
-    const params = new URLSearchParams(window.location.search)
+    const params = new URLSearchParams(location.search)
     return params.get('category')
+  }
+
+  // Route mappings for hybrid routing
+  const routeToPage = {
+    "/Menu": null,
+    "/Transactions": "Transaction",
+    "/clock": "Timesheets",
+    "/settings": "Settings",
+  }
+  
+  const pageToRoute = {
+    null: "/Menu",
+    "Transaction": "/Transactions",
+    "Timesheets": "/clock",
+    "Settings": "/settings",
   }
 
   // Initialize activeView from URL pathname or localStorage
   const [activeView, setActiveView] = useState(() => {
-    // First check URL pathname
-    const pathname = window.location.pathname
-    const path = pathname.split('/').filter(Boolean)[0] // Get first path segment
+    // First check URL pathname (new routes)
+    const pathname = location.pathname
+    if (routeToPage[pathname] !== undefined) {
+      return routeToPage[pathname]
+    }
+    // Fallback: check old route format
+    const path = pathname.split('/').filter(Boolean)[0]
     if (path && ['Transaction', 'Timesheets', 'Settings'].includes(path)) {
       return path
     }
@@ -346,9 +471,12 @@ function App() {
     return loadFromStorage(STORAGE_KEYS.ACTIVE_VIEW, null)
   })
 
+  // Check if we're on the menu route
+  const isMenuRoute = location.pathname === "/Menu" || location.pathname === "/menu" || location.pathname === "/" || activeView === null
+
   const [selectedCategory, setSelectedCategory] = useState(() => {
     // Check URL first if on main menu (no activeView in URL)
-    const pathname = window.location.pathname
+    const pathname = location.pathname
     const path = pathname.split('/').filter(Boolean)[0]
     if (!path || !['Transaction', 'Timesheets', 'Settings'].includes(path)) {
       const categoryFromURL = getCategoryFromURL()
@@ -448,6 +576,10 @@ function App() {
   const checkoutRef = useRef(null)
   const checkoutInstanceRef = useRef(null)
   const checkoutInitiatedRef = useRef(false)
+  // Debug refs for settings sidebar measurement
+  const settingsSidebarRef = useRef(null)
+  const settingsLastItemRef = useRef(null)
+  const navigationFooterRef = useRef(null)
   const [discountCode, setDiscountCode] = useState('')
   const [appliedDiscountCode, setAppliedDiscountCode] = useState(null)
   const [isApplyingDiscount, setIsApplyingDiscount] = useState(false)
@@ -605,7 +737,7 @@ function App() {
   const [lastManualDateTimeEdit, setLastManualDateTimeEdit] = useState(null)
   const [activeSettingsSection, setActiveSettingsSection] = useState(() => {
     // Check URL first if on Settings view
-    const pathname = window.location.pathname
+    const pathname = location.pathname
     const path = pathname.split('/').filter(Boolean)[0]
     if (path === 'Settings') {
       const sectionFromURL = getSectionFromURL()
@@ -637,6 +769,7 @@ function App() {
     }
   })
   const tosContentRef = useRef(null)
+  const settingsContentRef = useRef(null)
   const [teamMembers, setTeamMembers] = useState(() => loadFromStorage(STORAGE_KEYS.TEAM_MEMBERS, []))
   const [weeklySchedule, setWeeklySchedule] = useState(() => {
     try {
@@ -887,9 +1020,29 @@ function App() {
           const healthResponse = await axios.get(`${API_BASE_URL.replace('/api', '')}/api/health`)
           console.log('✅ Backend health check passed:', healthResponse.data)
         } catch (healthError) {
-          console.warn('⚠️ Backend server not available. Make sure it is running on https://localhost:4001')
-          console.warn('   Health check error:', healthError.response?.status || healthError.message)
-          console.warn('   Start it with: cd Back && npm start')
+          const backendUrl = API_BASE_URL.replace('/api', '')
+          console.error('❌ Backend server not available!')
+          console.error('   Backend URL:', backendUrl)
+          console.error('   Health check error:', healthError.response?.status || healthError.message)
+          console.error('   Error details:', healthError)
+          
+          if (healthError.code === 'ERR_NETWORK' || healthError.message?.includes('Network Error')) {
+            console.error('   🔍 Network Error - Possible causes:')
+            console.error('      1. Backend is not running')
+            console.error('      2. SSL certificate not accepted (check browser warnings)')
+            console.error('      3. Windows Firewall blocking port 4001')
+            console.error('      4. Both devices not on same network')
+            console.error('      5. Backend URL incorrect:', backendUrl)
+          } else if (healthError.response?.status === 0) {
+            console.error('   🔍 CORS or Network Error - Request was blocked')
+            console.error('      Check backend window for CORS logs')
+            console.error('      Make sure backend allows origin:', window.location.origin)
+          } else {
+            console.error('   🔍 HTTP Error:', healthError.response?.status)
+            console.error('      Response:', healthError.response?.data)
+          }
+          
+          console.warn('   Start backend with: cd Back && npm start')
           // Don't load from localStorage - keep products empty if backend is unavailable
           setProducts([])
           return
@@ -976,134 +1129,291 @@ function App() {
     }
   }, [teamMembers, currentUser])
 
+  // Redirect from / to /Menu on initial load, and from /menu to /Menu for backward compatibility
+  // Also redirect /transactions to /Transactions
+  // This must run BEFORE the sync effect to ensure URL is correct
+  useEffect(() => {
+    if (location.pathname === '/' || location.pathname === '') {
+      navigate('/Menu', { replace: true })
+      // Also update parent window URL if in iframe (for DesktopScaledFrame)
+      try {
+        if (window.self !== window.top && window.top.location.hostname === window.location.hostname) {
+          const newUrl = new URL(window.top.location.href)
+          newUrl.pathname = '/Menu'
+          window.top.history.replaceState({}, '', newUrl.toString())
+        }
+      } catch (e) {
+        // Cross-origin or other security restriction - ignore
+      }
+      return
+    } else if (location.pathname === '/menu') {
+      // Redirect lowercase /menu to capitalized /Menu
+      const search = location.search // Preserve query params
+      navigate(`/Menu${search}`, { replace: true })
+      // Also update parent window URL if in iframe
+      try {
+        if (window.self !== window.top && window.top.location.hostname === window.location.hostname) {
+          const newUrl = new URL(window.top.location.href)
+          newUrl.pathname = '/Menu'
+          if (search) newUrl.search = search
+          window.top.history.replaceState({}, '', newUrl.toString())
+        }
+      } catch (e) {
+        // Cross-origin or other security restriction - ignore
+      }
+      return
+    } else if (location.pathname === '/transactions') {
+      // Redirect lowercase /transactions to capitalized /Transactions
+      const search = location.search // Preserve query params
+      navigate(`/Transactions${search}`, { replace: true })
+      // Also update parent window URL if in iframe
+      try {
+        if (window.self !== window.top && window.top.location.hostname === window.location.hostname) {
+          const newUrl = new URL(window.top.location.href)
+          newUrl.pathname = '/Transactions'
+          if (search) newUrl.search = search
+          window.top.history.replaceState({}, '', newUrl.toString())
+        }
+      } catch (e) {
+        // Cross-origin or other security restriction - ignore
+      }
+      return
+    }
+  }, [location.pathname, location.search, navigate])
+
+  // Sync URL -> activeView when location changes (browser back/forward, direct URL access)
+  useEffect(() => {
+    const pathname = location.pathname
+    // Check new route format first
+    if (routeToPage[pathname] !== undefined) {
+      const page = routeToPage[pathname]
+      if (activeView !== page) {
+        setActiveView(page)
+      }
+    } else {
+      // Fallback: check old route format
+      const path = pathname.split('/').filter(Boolean)[0]
+      if (path && ['Transaction', 'Timesheets', 'Settings'].includes(path)) {
+        if (activeView !== path) {
+          setActiveView(path)
+        }
+      } else if (pathname === '/' || pathname === '' || pathname === '/menu') {
+        // Root path or old menu path should redirect to /Menu (handled above) and set activeView to null
+        if (activeView !== null) {
+          setActiveView(null)
+        }
+      }
+    }
+  }, [location.pathname])
+
   // Persist activeView to localStorage and URL pathname
   useEffect(() => {
     try {
       if (activeView) {
         localStorage.setItem(STORAGE_KEYS.ACTIVE_VIEW, JSON.stringify(activeView))
-        // Update URL pathname, preserving section if Settings view
-        const currentPath = window.location.pathname.split('/').filter(Boolean)[0]
-        if (currentPath !== activeView) {
-          let newURL = `/${activeView}`
-          // If Settings view, preserve or add section
-          if (activeView === 'Settings') {
-            const currentSection = getSectionFromURL()
-            if (currentSection && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'Terms and Conditions'].includes(currentSection)) {
-              newURL = `/${activeView}/${encodeURIComponent(currentSection)}`
-            } else {
-              newURL = `/${activeView}/${encodeURIComponent(activeSettingsSection)}`
-            }
+        // Update URL pathname using new route format
+        const expectedRoute = pageToRoute[activeView] || '/Menu'
+        let newURL = expectedRoute
+        // If Settings view, preserve or add section
+        if (activeView === 'Settings') {
+          const currentSection = getSectionFromURL()
+          if (currentSection && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'Terms and Conditions'].includes(currentSection)) {
+            newURL = `${expectedRoute}/${encodeURIComponent(currentSection)}`
+          } else {
+            newURL = `${expectedRoute}/${encodeURIComponent(activeSettingsSection)}`
           }
-          window.history.replaceState(null, '', newURL)
+        }
+        // Only navigate if URL doesn't match
+        if (location.pathname !== newURL && !location.pathname.startsWith(newURL + '/')) {
+          navigate(newURL, { replace: false })
+          // Also update parent window URL if in iframe
+          try {
+            if (window.self !== window.top && window.top.location.hostname === window.location.hostname) {
+              const parentUrl = new URL(window.top.location.href)
+              parentUrl.pathname = newURL
+              window.top.history.replaceState({}, '', parentUrl.toString())
+            }
+          } catch (e) {
+            // Cross-origin or other security restriction - ignore
+          }
         }
       } else {
         localStorage.removeItem(STORAGE_KEYS.ACTIVE_VIEW)
-        // Update URL to root with category query param if needed
-        const params = new URLSearchParams(window.location.search)
+        // Update URL to /Menu with category query param if needed
+        const params = new URLSearchParams(location.search)
         const categoryParam = params.get('category')
+        let newURL = '/Menu'
         if (categoryParam && categoryParam !== 'All') {
-          window.history.replaceState(null, '', `/?category=${encodeURIComponent(categoryParam)}`)
-        } else {
-          const currentPath = window.location.pathname.split('/').filter(Boolean)[0]
-          if (currentPath && ['Transaction', 'Timesheets', 'Settings'].includes(currentPath)) {
-            window.history.replaceState(null, '', '/')
+          newURL = `/Menu?category=${encodeURIComponent(categoryParam)}`
+        }
+        // Only navigate if URL doesn't match
+        if (location.pathname !== newURL && location.pathname !== '/Menu' && location.pathname !== '/menu') {
+          navigate(newURL, { replace: false })
+          // Also update parent window URL if in iframe
+          try {
+            if (window.self !== window.top && window.top.location.hostname === window.location.hostname) {
+              const parentUrl = new URL(window.top.location.href)
+              parentUrl.pathname = newURL
+              if (categoryParam && categoryParam !== 'All') {
+                parentUrl.search = `?category=${encodeURIComponent(categoryParam)}`
+              } else {
+                parentUrl.search = ''
+              }
+              window.top.history.replaceState({}, '', parentUrl.toString())
+            }
+          } catch (e) {
+            // Cross-origin or other security restriction - ignore
           }
         }
       }
     } catch (error) {
       console.error('Error saving activeView to localStorage:', error)
     }
-  }, [activeView, activeSettingsSection])
+  }, [activeView, activeSettingsSection, location.pathname, location.search, navigate])
 
   // Persist activeSettingsSection to URL and localStorage
   useEffect(() => {
     if (activeView === 'Settings') {
       try {
         localStorage.setItem('pos_active_settings_section', JSON.stringify(activeSettingsSection))
-        // Update URL to include section
-        const pathname = window.location.pathname
-        const path = pathname.split('/').filter(Boolean)[0]
-        if (path === 'Settings') {
-          const currentSection = getSectionFromURL()
-          if (currentSection !== activeSettingsSection) {
-            window.history.replaceState(null, '', `/${activeView}/${encodeURIComponent(activeSettingsSection)}`)
-          }
+        // Update URL to include section using new route format
+        const baseRoute = pageToRoute['Settings'] || '/settings'
+        const currentSection = getSectionFromURL()
+        if (currentSection !== activeSettingsSection) {
+          navigate(`${baseRoute}/${encodeURIComponent(activeSettingsSection)}`, { replace: true })
         }
       } catch (error) {
         console.error('Error saving activeSettingsSection:', error)
       }
     }
-  }, [activeSettingsSection, activeView])
+  }, [activeSettingsSection, activeView, location.pathname, navigate])
 
   // Persist selectedCategory to URL when on main menu
   useEffect(() => {
     if (!activeView) {
       // On main menu, update URL with category query param
-      const params = new URLSearchParams(window.location.search)
+      const params = new URLSearchParams(location.search)
       const currentCategory = params.get('category')
       if (currentCategory !== selectedCategory) {
         if (selectedCategory && selectedCategory !== 'All') {
-          window.history.replaceState(null, '', `/?category=${encodeURIComponent(selectedCategory)}`)
+          navigate(`/Menu?category=${encodeURIComponent(selectedCategory)}`, { replace: true })
         } else {
           // Remove category param if 'All' or empty
-          window.history.replaceState(null, '', '/')
+          navigate('/Menu', { replace: true })
         }
       }
     }
-  }, [selectedCategory, activeView])
+  }, [selectedCategory, activeView, location.search, navigate])
 
-  // Restore route from URL on page load/reload
-  useEffect(() => {
-    // This runs on mount to ensure route is restored from URL after initial render
-    const pathname = window.location.pathname
-    const path = pathname.split('/').filter(Boolean)[0]
-    if (path && ['Transaction', 'Timesheets', 'Settings'].includes(path)) {
-      // Update if different from current state
-      setActiveView(prevView => prevView !== path ? path : prevView)
-      
-      // Also restore section if Settings
-      if (path === 'Settings') {
-        const sectionFromURL = getSectionFromURL()
-        if (sectionFromURL && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'Terms and Conditions'].includes(sectionFromURL)) {
-          setActiveSettingsSection(sectionFromURL)
-        }
+  // Navigation function that updates both state and URL
+  const goToPage = useCallback((page) => {
+    setActiveView(page)
+    const route = pageToRoute[page] || '/Menu'
+    navigate(route, { replace: false })
+    // Also update parent window URL if in iframe (for DesktopScaledFrame)
+    try {
+      if (window.self !== window.top && window.top.location.hostname === window.location.hostname) {
+        const newUrl = new URL(window.top.location.href)
+        newUrl.pathname = route
+        window.top.history.replaceState({}, '', newUrl.toString())
       }
-    } else {
-      // On main menu, restore category from URL
+    } catch (e) {
+      // Cross-origin or other security restriction - ignore
+    }
+  }, [navigate, pageToRoute])
+
+  // Restore section from URL when on Settings page
+  useEffect(() => {
+    if (activeView === 'Settings') {
+      const sectionFromURL = getSectionFromURL()
+      if (sectionFromURL && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'Terms and Conditions'].includes(sectionFromURL)) {
+        setActiveSettingsSection(sectionFromURL)
+      }
+    }
+  }, [location.pathname, activeView])
+
+  // DEBUG: Measure settings sidebar cutoff issue
+  useEffect(() => {
+    if (activeView === 'Settings' && settingsSidebarRef.current && settingsLastItemRef.current) {
+      const measureSidebarCutoff = () => {
+        const sidebar = settingsSidebarRef.current
+        const lastItem = settingsLastItemRef.current
+        const footer = document.querySelector('.navigation-footer')
+        
+        if (!sidebar || !lastItem || !footer) return
+        
+        const sidebarRect = sidebar.getBoundingClientRect()
+        const lastItemRect = lastItem.getBoundingClientRect()
+        const footerRect = footer.getBoundingClientRect()
+        const windowHeight = window.innerHeight
+        
+        const overlap = lastItemRect.bottom - footerRect.top
+        
+        console.log('=== SETTINGS SIDEBAR MEASUREMENT ===')
+        console.log('Sidebar bottom:', sidebarRect.bottom)
+        console.log('Last item bottom:', lastItemRect.bottom)
+        console.log('Footer top:', footerRect.top)
+        console.log('Window height:', windowHeight)
+        console.log('Overlap (lastItem.bottom - footer.top):', overlap)
+        console.log(overlap > 0 ? '⚠️ FOOTER IS COVERING SIDEBAR CONTENT' : '✓ No footer overlap')
+        
+        // Walk up the parent tree to find clipping ancestors
+        console.log('\n=== ANCESTOR OVERFLOW/HEIGHT CHECK ===')
+        let current = sidebar.parentElement
+        let depth = 0
+        while (current && depth < 10) {
+          const computed = window.getComputedStyle(current)
+          const overflow = computed.overflow
+          const overflowY = computed.overflowY
+          const height = computed.height
+          const maxHeight = computed.maxHeight
+          const className = current.className || '(no class)'
+          
+          const isClipping = overflow === 'hidden' || overflow === 'clip' || 
+                           overflowY === 'hidden' || overflowY === 'clip' ||
+                           (height !== 'auto' && height !== 'none' && parseFloat(height) > 0) ||
+                           (maxHeight !== 'none' && parseFloat(maxHeight) > 0)
+          
+          if (isClipping || current.classList.contains('main-content')) {
+            console.log(`[${depth}] ${current.tagName}.${className}:`)
+            console.log(`  overflow: ${overflow}, overflowY: ${overflowY}`)
+            console.log(`  height: ${height}, maxHeight: ${maxHeight}`)
+            if (isClipping) {
+              console.log(`  ⚠️ POTENTIAL CLIPPING SOURCE`)
+            }
+          }
+          
+          if (current.classList.contains('main-content') || current.id === 'root') {
+            break
+          }
+          current = current.parentElement
+          depth++
+        }
+        console.log('=====================================\n')
+      }
+      
+      // Measure after a short delay to ensure layout is complete
+      const timeoutId = setTimeout(measureSidebarCutoff, 100)
+      window.addEventListener('resize', measureSidebarCutoff)
+      window.addEventListener('scroll', measureSidebarCutoff)
+      
+      return () => {
+        clearTimeout(timeoutId)
+        window.removeEventListener('resize', measureSidebarCutoff)
+        window.removeEventListener('scroll', measureSidebarCutoff)
+      }
+    }
+  }, [activeView, activeSettingsSection])
+
+  // Restore category from URL when on menu
+  useEffect(() => {
+    if (!activeView) {
       const categoryFromURL = getCategoryFromURL()
       if (categoryFromURL) {
         setSelectedCategory(categoryFromURL)
       }
     }
-  }, []) // Only run on mount
-
-  // Listen for pathname changes (browser back/forward buttons)
-  useEffect(() => {
-    const handlePopState = () => {
-      const pathname = window.location.pathname
-      const path = pathname.split('/').filter(Boolean)[0]
-      if (path && ['Transaction', 'Timesheets', 'Settings'].includes(path)) {
-        setActiveView(path)
-        // Restore section if Settings
-        if (path === 'Settings') {
-          const sectionFromURL = getSectionFromURL()
-          if (sectionFromURL && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'Terms and Conditions'].includes(sectionFromURL)) {
-            setActiveSettingsSection(sectionFromURL)
-          }
-        }
-      } else {
-        setActiveView(null)
-        // Restore category if on main menu
-        const categoryFromURL = getCategoryFromURL()
-        if (categoryFromURL) {
-          setSelectedCategory(categoryFromURL)
-        }
-      }
-    }
-
-    window.addEventListener('popstate', handlePopState)
-    return () => window.removeEventListener('popstate', handlePopState)
-  }, [])
+  }, [location.search, activeView])
 
   useEffect(() => {
     try {
@@ -1403,9 +1713,30 @@ function App() {
 
   // Reset scroll position when TOS section is opened
   useEffect(() => {
-    if (activeSettingsSection === 'Terms and Conditions' && tosContentRef.current) {
-      tosContentRef.current.scrollTop = 0
+    if (activeSettingsSection === 'Terms and Conditions' && settingsContentRef.current) {
+      settingsContentRef.current.scrollTop = 0
       setTosScrolledToBottom(false)
+    }
+  }, [activeSettingsSection])
+
+  // Handle scroll detection for TOS when on Terms and Conditions page
+  useEffect(() => {
+    const element = settingsContentRef.current
+    if (activeSettingsSection === 'Terms and Conditions' && element) {
+      const handleScroll = () => {
+        if (element) {
+          const isAtBottom = element.scrollHeight - element.scrollTop <= element.clientHeight + 10
+          setTosScrolledToBottom(isAtBottom)
+        }
+      }
+      element.addEventListener('scroll', handleScroll)
+      // Initial check
+      handleScroll()
+      return () => {
+        if (element) {
+          element.removeEventListener('scroll', handleScroll)
+        }
+      }
     }
   }, [activeSettingsSection])
 
@@ -1426,7 +1757,7 @@ function App() {
       alert('You must scroll to the bottom and click "I Agree" before you can navigate away from the Terms and Conditions page.')
       return
     }
-    setActiveView(newView)
+    goToPage(newView)
   }
 
   // Calculate total minutes worked for an employee from all timesheet entries (excluding breaks)
@@ -2961,7 +3292,7 @@ function App() {
     
     // Redirect to sign in/sign up page
     setActiveView(null)
-    window.history.replaceState(null, '', '/')
+    navigate('/', { replace: true })
     setIsLoginModalOpen(false)
     setIsSignupModalOpen(false)
     setShowSignupOnAuthPage(false)
@@ -3613,7 +3944,7 @@ function App() {
       checkoutInitiatedRef.current = false
       // Keep showPaymentPage true - user cannot access UI without payment
       // Clean URL
-      window.history.replaceState({}, document.title, window.location.pathname)
+      navigate(location.pathname, { replace: true })
       return
     }
     
@@ -3647,7 +3978,7 @@ function App() {
           setIsProcessingPayment(false)
           
           // Clean URL
-          window.history.replaceState({}, document.title, window.location.pathname)
+          navigate(location.pathname, { replace: true })
           
           alert('Payment successful! You have been charged $99.00 setup fee and $30.00/month subscription. Welcome to your POS system!')
         } else {
@@ -5390,6 +5721,8 @@ function App() {
                 <input
                   type="email"
                   id="auth-login-email"
+                  name="email"
+                  autoComplete="email"
                   value={loginFormData.email}
                   onChange={(e) => setLoginFormData({ ...loginFormData, email: e.target.value })}
                   placeholder="Enter your email"
@@ -5413,6 +5746,8 @@ function App() {
                   <input
                     type={showLoginPassword ? "text" : "password"}
                     id="auth-login-password"
+                    name="password"
+                    autoComplete="current-password"
                     value={loginFormData.password}
                     onChange={(e) => setLoginFormData({ ...loginFormData, password: e.target.value })}
                     placeholder="Enter your password"
@@ -5527,6 +5862,8 @@ function App() {
                 <input
                   type="email"
                   id="auth-signup-email"
+                  name="email"
+                  autoComplete="email"
                   value={signupFormData.email}
                   onChange={(e) => setSignupFormData({ ...signupFormData, email: e.target.value })}
                   placeholder="Enter your email"
@@ -5550,6 +5887,8 @@ function App() {
                   <input
                     type={showSignupPassword ? "text" : "password"}
                     id="auth-signup-password"
+                    name="new-password"
+                    autoComplete="new-password"
                     value={signupFormData.password}
                     onChange={(e) => setSignupFormData({ ...signupFormData, password: e.target.value })}
                     placeholder="Enter your password (min 6 characters)"
@@ -5608,6 +5947,8 @@ function App() {
                   <input
                     type={showSignupConfirmPassword ? "text" : "password"}
                     id="auth-signup-confirm-password"
+                    name="confirm-password"
+                    autoComplete="new-password"
                     value={signupFormData.confirmPassword}
                     onChange={(e) => setSignupFormData({ ...signupFormData, confirmPassword: e.target.value })}
                     placeholder="Confirm your password"
@@ -5721,8 +6062,10 @@ function App() {
     )
   }
 
+  // Use the existing conditional rendering based on activeView
+  // This is the working UI
   return (
-    <div className={`app-container ${activeView === 'Transaction' ? 'transaction-view' : ''}`}>
+    <div className={`app-container ${isMenuRoute ? 'route-menu' : ''} ${activeView === 'Transaction' || location.pathname === '/Transactions' || location.pathname === '/transactions' ? 'transaction-view' : ''}`}>
       <div className="main-content">
         {activeView === 'Transaction' ? (
           <div className="transactions-view" style={{ width: '100%', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -5761,6 +6104,7 @@ function App() {
                       type="text"
                       id="transaction-search"
                       name="transaction-search"
+                      autoComplete="off"
                       placeholder="Search by name, date, time, or items (e.g., 'Lisa 12/07 20:13 Power Bowl')"
                       value={transactionSearchQuery}
                       onChange={(e) => setTransactionSearchQuery(e.target.value)}
@@ -6644,12 +6988,12 @@ function App() {
             </div>
           </div>
         ) : activeView === 'Settings' ? (
-          <div className="settings-view" style={{ width: '100%', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, position: 'relative' }}>
+          <div className="settings-view" style={{ width: '100%', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
             {/* Settings Content Wrapper - Sidebar and Main Content */}
-            <div className="settings-content-wrapper" style={{ display: 'flex', flexDirection: 'row', flex: 1, minHeight: 0, position: 'relative', overflow: 'visible' }}>
+            <div className="settings-content-wrapper" style={{ display: 'flex', flexDirection: 'row', flex: 1, minHeight: 0 }}>
               {/* Settings Sidebar */}
-              <div className="settings-sidebar" style={{ width: '320px', flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: '2px solid #c0c0c0', backgroundColor: '#ffffff', position: 'relative', zIndex: 1 }}>
-                <div className="settings-sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div ref={settingsSidebarRef} className="settings-sidebar">
+                <div className="settings-sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '1rem', paddingBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <button
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Account' ? 'active' : ''}`}
                     onClick={() => handleSettingsSectionChange('Account')}
@@ -6727,6 +7071,7 @@ function App() {
                     <span>Compliance</span>
                   </button>
                   <button
+                    ref={settingsLastItemRef}
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Terms and Conditions' ? 'active' : ''}`}
                     onClick={() => handleSettingsSectionChange('Terms and Conditions')}
                   >
@@ -6758,35 +7103,40 @@ function App() {
                   </svg>
                 </button>
                 )}
-                <div className="settings-content" style={{ maxWidth: 'none', margin: 0, flex: 1, overflowY: activeSettingsSection === 'Account' ? 'hidden' : 'auto', overflowX: 'visible', width: '100%', padding: activeSettingsSection === 'Team members' ? '2rem 2rem 2rem 220px' : '2rem', minHeight: 0, position: 'relative', zIndex: 50 }}>
+                <div 
+                  ref={settingsContentRef}
+                  className="settings-content" 
+                  style={{ maxWidth: 'none', margin: 0, flex: 1, overflowY: activeSettingsSection === 'Team members' ? 'hidden' : 'auto', overflowX: 'hidden', width: '100%', padding: activeSettingsSection === 'Team members' ? '2rem 1rem' : '2rem 1rem', minHeight: 0, position: 'relative', zIndex: 50, boxSizing: 'border-box' }}>
                   {activeSettingsSection === 'Account' && (
-                  <div className="settings-form" style={{ maxWidth: '1200px', margin: '0', marginLeft: '-100px', padding: '1rem' }}>
-                    {/* Payment Method and Owner/Manager Section - Side by Side */}
-                    <div style={{ display: 'flex', gap: '2.5rem', marginBottom: '3rem', marginLeft: '200px', width: '100%', alignItems: 'flex-start' }}>
+                  <div className="settings-form account-settings-container" style={{ maxWidth: '1200px', margin: '0 auto', padding: '1rem', boxSizing: 'border-box', width: '100%', overflow: 'visible' }}>
+                    {/* Payment Method and Owner/Manager Section - Original Layout with Scale */}
+                    <div className="account-settings-grid" style={{ display: 'flex', gap: '1.5rem', marginBottom: '2rem', width: '100%', alignItems: 'flex-start', boxSizing: 'border-box', flexWrap: 'nowrap', overflow: 'visible' }}>
                       {/* Payment Method Section */}
-                      <div style={{ flex: '0 0 450px', padding: '2.5rem', backgroundColor: '#f8f9fa', borderRadius: '16px', border: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', marginBottom: '1rem', width: '100%' }}>
-                      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#1e3a5f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <div className="account-section payment-method-section" style={{ flex: '0 0 420px', minWidth: '310px', maxWidth: '420px', padding: '1.65rem', backgroundColor: '#f8f9fa', borderRadius: '12px', border: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', alignItems: 'center', boxSizing: 'border-box', flexShrink: 1 }}>
+                    <div className="payment-method-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.85rem', marginBottom: '0.85rem', width: '100%' }}>
+                      <svg className="payment-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#1e3a5f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
                         <line x1="1" y1="10" x2="23" y2="10"></line>
                       </svg>
-                      <h3 style={{ margin: 0, fontSize: '1.4rem', fontWeight: '600', color: '#1e3a5f' }}>Payment Method</h3>
+                      <h3 className="payment-title" style={{ margin: 0, fontSize: '1.2rem', fontWeight: '600', color: '#1e3a5f' }}>Payment Method</h3>
                     </div>
-                    <span style={{ fontSize: '1.05rem', color: '#666', display: 'block', marginBottom: '1.75rem', textAlign: 'center' }}>Card on file for subscription</span>
+                    <span className="payment-subtitle" style={{ fontSize: '0.95rem', color: '#666', display: 'block', marginBottom: '1.4rem', textAlign: 'center' }}>Card on file for subscription</span>
                     
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', flex: 1, width: '100%', alignItems: 'center' }}>
+                    <div className="payment-form-fields" style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem', flex: 1, width: '100%', alignItems: 'center', maxWidth: '100%' }}>
                       {/* Cardholder Name */}
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
-                        <label htmlFor="cardholder-name" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500', textAlign: 'center' }}>Cardholder Name</label>
-                        <div style={{ width: '280px', position: 'relative' }}>
+                        <label htmlFor="cardholder-name" className="payment-label" style={{ fontSize: '1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500', textAlign: 'center' }}>Cardholder Name</label>
+                        <div style={{ width: '100%', maxWidth: '100%', position: 'relative' }}>
                           <input
                             type="text"
                             id="cardholder-name"
                             name="cardholder-name"
+                            autoComplete="cc-name"
                             value={settings.cardholderName}
                             onChange={(e) => setSettings({ ...settings, cardholderName: e.target.value })}
                             disabled={!isEditingSettings}
                             placeholder="Name on card"
+                            className="payment-input"
                             style={{ 
                               width: '100%', 
                               padding: '1rem 3.5rem 1rem 1rem', 
@@ -6831,12 +7181,13 @@ function App() {
 
                       {/* Card Number */}
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
-                        <label htmlFor="card-number" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500', textAlign: 'center' }}>Card Number</label>
-                        <div style={{ width: '280px', position: 'relative' }}>
+                        <label htmlFor="card-number" className="payment-label" style={{ fontSize: '1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500', textAlign: 'center' }}>Card Number</label>
+                        <div style={{ width: '100%', maxWidth: '100%', position: 'relative' }}>
                           <input
                             type="text"
                             id="card-number"
                             name="card-number"
+                            autoComplete="cc-number"
                             value={settings.cardNumber}
                             onChange={(e) => {
                               let value = e.target.value.replace(/\s/g, '').replace(/\D/g, '');
@@ -6847,6 +7198,7 @@ function App() {
                             disabled={!isEditingSettings}
                             placeholder="•••• •••• •••• ••••"
                             maxLength={19}
+                            className="payment-input"
                             style={{ 
                               width: '100%', 
                               padding: '1rem 3.5rem 1rem 1rem', 
@@ -6889,15 +7241,16 @@ function App() {
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', gap: '1.25rem', width: '100%' }}>
+                      <div style={{ display: 'flex', gap: '0.75rem', width: '100%', flexWrap: 'wrap' }}>
                         {/* Expiry Date */}
-                        <div className="settings-input-group" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                          <label htmlFor="card-expiry" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500', textAlign: 'center' }}>Expiry Date</label>
+                        <div className="settings-input-group" style={{ flex: '1 1 45%', minWidth: '120px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <label htmlFor="card-expiry" className="payment-label" style={{ fontSize: '1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500', textAlign: 'center' }}>Expiry Date</label>
                           <div className="settings-input-wrapper" style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
                             <input
                               type="text"
                               id="card-expiry"
                               name="card-expiry"
+                              autoComplete="cc-exp"
                               value={settings.cardExpiry}
                               onChange={(e) => {
                                 let value = e.target.value.replace(/\D/g, '');
@@ -6909,18 +7262,20 @@ function App() {
                               }}
                               disabled={!isEditingSettings}
                               placeholder="MM/YY"
-                              className="settings-input"
+                              className="settings-input payment-input"
                               maxLength={5}
-                              style={{ width: '100%', padding: '1rem 3.5rem 1rem 1rem', fontSize: '1.15rem', textAlign: 'center', boxSizing: 'border-box' }}
+                              style={{ width: '100%', padding: '0.75rem 2.75rem 0.75rem 0.75rem', fontSize: '0.9rem', textAlign: 'center', boxSizing: 'border-box', border: '2px solid #999', borderRadius: '6px', outline: 'none', fontFamily: 'inherit', color: '#111', backgroundColor: '#ffffff', transition: 'all 0.2s' }}
+                              onFocus={(e) => e.target.style.borderColor = '#1e3a5f'}
+                              onBlur={(e) => e.target.style.borderColor = '#999'}
                             />
-                            <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
+                            <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`} style={{ right: '0.75rem' }}>
                               {isEditingSettings ? (
-                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
                                   <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
                                 </svg>
                               ) : (
-                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
                                   <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                                 </svg>
@@ -6930,13 +7285,14 @@ function App() {
                         </div>
 
                         {/* CVC */}
-                        <div className="settings-input-group" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                          <label htmlFor="card-cvc" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500', textAlign: 'center' }}>CVC</label>
+                        <div className="settings-input-group" style={{ flex: '1 1 45%', minWidth: '120px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                          <label htmlFor="card-cvc" className="payment-label" style={{ fontSize: '1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500', textAlign: 'center' }}>CVC</label>
                           <div className="settings-input-wrapper" style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
                             <input
                               type="text"
                               id="card-cvc"
                               name="card-cvc"
+                              autoComplete="cc-csc"
                               value={settings.cardCVC}
                               onChange={(e) => {
                                 let value = e.target.value.replace(/\D/g, '');
@@ -6945,18 +7301,20 @@ function App() {
                               }}
                               disabled={!isEditingSettings}
                               placeholder="•••"
-                              className="settings-input"
+                              className="settings-input payment-input"
                               maxLength={4}
-                              style={{ width: '100%', padding: '1rem 3.5rem 1rem 1rem', fontSize: '1.15rem', textAlign: 'center', boxSizing: 'border-box' }}
+                              style={{ width: '100%', padding: '0.75rem 2.75rem 0.75rem 0.75rem', fontSize: '0.9rem', textAlign: 'center', boxSizing: 'border-box', border: '2px solid #999', borderRadius: '6px', outline: 'none', fontFamily: 'inherit', color: '#111', backgroundColor: '#ffffff', transition: 'all 0.2s' }}
+                              onFocus={(e) => e.target.style.borderColor = '#1e3a5f'}
+                              onBlur={(e) => e.target.style.borderColor = '#999'}
                             />
-                            <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
+                            <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`} style={{ right: '0.75rem' }}>
                               {isEditingSettings ? (
-                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
                                   <path d="M7 11V7a5 5 0 0 1 9.9-1"></path>
                                 </svg>
                               ) : (
-                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
                                   <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                                 </svg>
@@ -6968,35 +7326,40 @@ function App() {
                     </div>
 
                     {/* Card type indicators */}
-                    <div style={{ display: 'flex', gap: '1rem', marginTop: '2rem', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }}>
-                      <div style={{ padding: '0.5rem 1rem', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: '600', color: '#1a1f71' }}>VISA</div>
-                      <div style={{ padding: '0.5rem 1rem', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: '600', color: '#eb001b' }}>MC</div>
-                      <div style={{ padding: '0.5rem 1rem', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: '600', color: '#006fcf' }}>AMEX</div>
-                      <div style={{ padding: '0.5rem 1rem', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #ddd', fontSize: '0.95rem', fontWeight: '600', color: '#ff6000' }}>DISC</div>
+                    <div className="card-type-indicators" style={{ display: 'flex', gap: '0.6rem', marginTop: '1.4rem', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }}>
+                      <div className="card-type-badge" style={{ padding: '0.45rem 0.85rem', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #ddd', fontSize: '0.9rem', fontWeight: '600', color: '#1a1f71' }}>VISA</div>
+                      <div className="card-type-badge" style={{ padding: '0.45rem 0.85rem', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #ddd', fontSize: '0.9rem', fontWeight: '600', color: '#eb001b' }}>MC</div>
+                      <div className="card-type-badge" style={{ padding: '0.45rem 0.85rem', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #ddd', fontSize: '0.9rem', fontWeight: '600', color: '#006fcf' }}>AMEX</div>
+                      <div className="card-type-badge" style={{ padding: '0.45rem 0.85rem', backgroundColor: '#fff', borderRadius: '6px', border: '1px solid #ddd', fontSize: '0.9rem', fontWeight: '600', color: '#ff6000' }}>DISC</div>
                     </div>
                       </div>
-                      </div>
+                    </div>
 
-                      {/* Owner, Manager, Location/Time - Right Side */}
-                      <div style={{ display: 'flex', gap: '2.5rem', flex: 1, alignItems: 'flex-start', width: '100%', marginLeft: '1180px', marginTop: '-680px' }}>
+                    {/* Owner, Manager, Location/Time - Right Side - Original Position */}
+                    <div className="account-info-columns" style={{ marginTop: '-640px', marginLeft: '440px' }}>
                     {/* Owner Column */}
-                    <div style={{ flex: '0 0 320px', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                      <h4 style={{ margin: '0 0 1rem 0', color: '#1e3a5f', fontSize: '1.35rem', fontWeight: '600', borderBottom: '2px solid #1e3a5f', paddingBottom: '0.85rem', whiteSpace: 'nowrap' }}>Owner Information</h4>
+                    <div className="account-section owner-section" style={{ display: 'flex', flexDirection: 'column', gap: '15px', boxSizing: 'border-box', width: '330px' }}>
+                      <div className="settings-input-group" style={{ width: '100%', marginBottom: 0 }}>
+                        <div className="settings-input-wrapper" style={{ width: '100%' }}>
+                          <h4 style={{ margin: '0', color: '#1e3a5f', fontSize: '1.1rem', fontWeight: '600', whiteSpace: 'nowrap', width: '100%', borderBottom: '2px solid #1e3a5f', paddingBottom: '0.85rem', boxSizing: 'border-box' }}>Owner Information</h4>
+                        </div>
+                      </div>
                       
                       {/* Owner Name */}
                       <div className="settings-input-group" style={{ width: '100%' }}>
-                        <label htmlFor="owner-name" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Owner Name</label>
+                        <label htmlFor="owner-name" style={{ fontSize: '0.9rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Owner Name</label>
                         <div className="settings-input-wrapper" style={{ width: '100%' }}>
                           <input
                             type="text"
                             id="owner-name"
                             name="owner-name"
+                            autoComplete="name"
                             value={settings.ownerName}
                             onChange={(e) => setSettings({ ...settings, ownerName: e.target.value })}
                             disabled={!isEditingSettings}
                             placeholder="Enter owner name"
                             className="settings-input"
-                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '1.15rem', boxSizing: 'border-box' }}
+                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '0.95rem', boxSizing: 'border-box' }}
                           />
                           <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
                             {isEditingSettings ? (
@@ -7016,18 +7379,19 @@ function App() {
 
                       {/* Owner Contact Email */}
                       <div className="settings-input-group" style={{ width: '100%' }}>
-                        <label htmlFor="owner-email" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Owner Email</label>
+                        <label htmlFor="owner-email" style={{ fontSize: '0.9rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Owner Email</label>
                         <div className="settings-input-wrapper" style={{ width: '100%' }}>
                           <input
                             type="email"
                             id="owner-email"
                             name="owner-email"
+                            autoComplete="email"
                             value={settings.ownerEmail}
                             onChange={(e) => setSettings({ ...settings, ownerEmail: e.target.value })}
                             disabled={!isEditingSettings}
                             placeholder="Enter owner email"
                             className="settings-input"
-                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '1.15rem', boxSizing: 'border-box' }}
+                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '0.95rem', boxSizing: 'border-box' }}
                           />
                           <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
                             {isEditingSettings ? (
@@ -7047,18 +7411,19 @@ function App() {
 
                       {/* Owner Contact Phone */}
                       <div className="settings-input-group" style={{ width: '100%' }}>
-                        <label htmlFor="owner-phone" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Owner Phone</label>
+                        <label htmlFor="owner-phone" style={{ fontSize: '0.9rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Owner Phone</label>
                         <div className="settings-input-wrapper" style={{ width: '100%' }}>
                           <input
                             type="tel"
                             id="owner-phone"
                             name="owner-phone"
+                            autoComplete="tel"
                             value={settings.ownerPhone}
                             onChange={(e) => setSettings({ ...settings, ownerPhone: e.target.value })}
                             disabled={!isEditingSettings}
                             placeholder="Enter owner phone"
                             className="settings-input"
-                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '1.15rem', boxSizing: 'border-box' }}
+                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '0.95rem', boxSizing: 'border-box' }}
                           />
                           <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
                             {isEditingSettings ? (
@@ -7078,18 +7443,19 @@ function App() {
 
                       {/* Business Name */}
                       <div className="settings-input-group" style={{ width: '100%' }}>
-                        <label htmlFor="business-name" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Business Name</label>
+                        <label htmlFor="business-name" style={{ fontSize: '0.9rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Business Name</label>
                         <div className="settings-input-wrapper" style={{ width: '100%' }}>
                           <input
                             type="text"
                             id="business-name"
                             name="business-name"
+                            autoComplete="organization"
                             value={settings.businessName}
                             onChange={(e) => setSettings({ ...settings, businessName: e.target.value })}
                             disabled={!isEditingSettings}
                             placeholder="Enter business name"
                             className="settings-input"
-                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '1.15rem', boxSizing: 'border-box' }}
+                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '0.95rem', boxSizing: 'border-box' }}
                           />
                           <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
                             {isEditingSettings ? (
@@ -7109,12 +7475,13 @@ function App() {
 
                       {/* Account Email */}
                       <div className="settings-input-group" style={{ width: '100%' }}>
-                        <label htmlFor="account-email" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Account Email</label>
+                        <label htmlFor="account-email" style={{ fontSize: '0.9rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Account Email</label>
                         <div className="settings-input-wrapper" style={{ width: '100%' }}>
                           <input
                             type="email"
                             id="account-email"
                             name="account-email"
+                            autoComplete="email"
                             value={currentUser?.email || settings.accountEmail}
                             disabled={true}
                             placeholder="Account email"
@@ -7130,7 +7497,7 @@ function App() {
                           </div>
                         </div>
                         {currentUser && (
-                          <small style={{ color: '#28a745', fontSize: '0.85rem', marginTop: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <small style={{ color: '#28a745', fontSize: '0.75rem', marginTop: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
                               <polyline points="22 4 12 14.01 9 11.01"></polyline>
@@ -7142,23 +7509,28 @@ function App() {
                     </div>
 
                     {/* Manager Column */}
-                    <div style={{ flex: '0 0 320px', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                      <h4 style={{ margin: '0 0 1rem 0', color: '#1e3a5f', fontSize: '1.35rem', fontWeight: '600', borderBottom: '2px solid #1e3a5f', paddingBottom: '0.85rem', whiteSpace: 'nowrap' }}>Manager Information</h4>
+                    <div className="account-section manager-section" style={{ display: 'flex', flexDirection: 'column', gap: '15px', boxSizing: 'border-box', width: '330px' }}>
+                      <div className="settings-input-group" style={{ width: '100%', marginBottom: 0 }}>
+                        <div className="settings-input-wrapper" style={{ width: '100%' }}>
+                          <h4 style={{ margin: '0', color: '#1e3a5f', fontSize: '1.1rem', fontWeight: '600', whiteSpace: 'nowrap', width: '100%', borderBottom: '2px solid #1e3a5f', paddingBottom: '0.85rem', boxSizing: 'border-box' }}>Manager Information</h4>
+                        </div>
+                      </div>
                       
                       {/* Manager Name */}
                       <div className="settings-input-group" style={{ width: '100%' }}>
-                        <label htmlFor="manager-name" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Manager Name</label>
+                        <label htmlFor="manager-name" style={{ fontSize: '0.9rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Manager Name</label>
                         <div className="settings-input-wrapper" style={{ width: '100%' }}>
                           <input
                             type="text"
                             id="manager-name"
                             name="manager-name"
+                            autoComplete="name"
                             value={settings.managerName}
                             onChange={(e) => setSettings({ ...settings, managerName: e.target.value })}
                             disabled={!isEditingSettings}
                             placeholder="Enter manager name"
                             className="settings-input"
-                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '1.15rem', boxSizing: 'border-box' }}
+                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '0.95rem', boxSizing: 'border-box' }}
                           />
                           <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
                             {isEditingSettings ? (
@@ -7178,18 +7550,19 @@ function App() {
 
                       {/* Manager Contact Email */}
                       <div className="settings-input-group" style={{ width: '100%' }}>
-                        <label htmlFor="manager-email" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Manager Email</label>
+                        <label htmlFor="manager-email" style={{ fontSize: '0.9rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Manager Email</label>
                         <div className="settings-input-wrapper" style={{ width: '100%' }}>
                           <input
                             type="email"
                             id="manager-email"
                             name="manager-email"
+                            autoComplete="email"
                             value={settings.managerEmail}
                             onChange={(e) => setSettings({ ...settings, managerEmail: e.target.value })}
                             disabled={!isEditingSettings}
                             placeholder="Enter manager email"
                             className="settings-input"
-                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '1.15rem', boxSizing: 'border-box' }}
+                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '0.95rem', boxSizing: 'border-box' }}
                           />
                           <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
                             {isEditingSettings ? (
@@ -7209,18 +7582,19 @@ function App() {
 
                       {/* Manager Contact Phone */}
                       <div className="settings-input-group" style={{ width: '100%' }}>
-                        <label htmlFor="manager-phone" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Manager Phone</label>
+                        <label htmlFor="manager-phone" style={{ fontSize: '0.9rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Manager Phone</label>
                         <div className="settings-input-wrapper" style={{ width: '100%' }}>
                           <input
                             type="tel"
                             id="manager-phone"
                             name="manager-phone"
+                            autoComplete="tel"
                             value={settings.managerPhone}
                             onChange={(e) => setSettings({ ...settings, managerPhone: e.target.value })}
                             disabled={!isEditingSettings}
                             placeholder="Enter manager phone"
                             className="settings-input"
-                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '1.15rem', boxSizing: 'border-box' }}
+                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '0.95rem', boxSizing: 'border-box' }}
                           />
                           <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
                             {isEditingSettings ? (
@@ -7240,18 +7614,19 @@ function App() {
 
                       {/* Business Address */}
                       <div className="settings-input-group" style={{ width: '100%', marginTop: '0', marginBottom: '0' }}>
-                        <label htmlFor="business-address" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500', marginTop: '0' }}>Business Address</label>
+                        <label htmlFor="business-address" style={{ fontSize: '0.9rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500', marginTop: '0' }}>Business Address</label>
                         <div className="settings-input-wrapper" style={{ width: '100%' }}>
                           <input
                             type="text"
                             id="business-address"
                             name="business-address"
+                            autoComplete="street-address"
                             value={settings.businessAddress}
                             onChange={(e) => setSettings({ ...settings, businessAddress: e.target.value })}
                             disabled={!isEditingSettings}
                             placeholder="Enter business address"
                             className="settings-input"
-                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '1.15rem', boxSizing: 'border-box' }}
+                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '0.95rem', boxSizing: 'border-box' }}
                           />
                           <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
                             {isEditingSettings ? (
@@ -7272,23 +7647,28 @@ function App() {
                     </div>
 
                     {/* Location & Time Column */}
-                    <div style={{ flex: '0 0 320px', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                      <h4 style={{ margin: '0 0 1rem 0', color: '#1e3a5f', fontSize: '1.35rem', fontWeight: '600', borderBottom: '2px solid #1e3a5f', paddingBottom: '0.85rem', whiteSpace: 'nowrap' }}>Location & Time</h4>
+                    <div className="account-section location-section" style={{ display: 'flex', flexDirection: 'column', gap: '15px', boxSizing: 'border-box', width: '330px' }}>
+                      <div className="settings-input-group" style={{ width: '100%', marginBottom: 0 }}>
+                        <div className="settings-input-wrapper" style={{ width: '100%' }}>
+                          <h4 style={{ margin: '0', color: '#1e3a5f', fontSize: '1.1rem', fontWeight: '600', whiteSpace: 'nowrap', width: '100%', borderBottom: '2px solid #1e3a5f', paddingBottom: '0.85rem', boxSizing: 'border-box' }}>Location & Time</h4>
+                        </div>
+                      </div>
                     
                       {/* Country */}
                       <div className="settings-input-group" style={{ width: '100%' }}>
-                        <label htmlFor="country" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Country</label>
+                        <label htmlFor="country" style={{ fontSize: '0.9rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Country</label>
                         <div className="settings-input-wrapper" style={{ width: '100%' }}>
                           <input
                             type="text"
                             id="country"
                             name="country"
+                            autoComplete="country"
                             value={settings.country}
                             onChange={(e) => setSettings({ ...settings, country: e.target.value })}
                             disabled={!isEditingSettings}
                             placeholder="Enter country"
                             className="settings-input"
-                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '1.15rem', boxSizing: 'border-box' }}
+                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '0.95rem', boxSizing: 'border-box' }}
                           />
                           <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
                             {isEditingSettings ? (
@@ -7308,18 +7688,19 @@ function App() {
 
                       {/* State */}
                       <div className="settings-input-group" style={{ width: '100%' }}>
-                        <label htmlFor="state" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>State</label>
+                        <label htmlFor="state" style={{ fontSize: '0.9rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>State</label>
                         <div className="settings-input-wrapper" style={{ width: '100%' }}>
                           <input
                             type="text"
                             id="state"
                             name="state"
+                            autoComplete="address-level1"
                             value={settings.state}
                             onChange={(e) => setSettings({ ...settings, state: e.target.value })}
                             disabled={!isEditingSettings}
                             placeholder="Enter state"
                             className="settings-input"
-                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '1.15rem', boxSizing: 'border-box' }}
+                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '0.95rem', boxSizing: 'border-box' }}
                           />
                           <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
                             {isEditingSettings ? (
@@ -7339,12 +7720,13 @@ function App() {
 
                       {/* Date */}
                       <div className="settings-input-group" style={{ width: '100%' }}>
-                        <label htmlFor="date" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Date</label>
+                        <label htmlFor="date" style={{ fontSize: '0.9rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500' }}>Date</label>
                         <div className="settings-input-wrapper" style={{ width: '100%' }}>
                           <input
                             type="date"
                             id="date"
                             name="date"
+                            autoComplete="off"
                             value={settings.date}
                             onChange={(e) => {
                               setSettings({ ...settings, date: e.target.value })
@@ -7352,7 +7734,7 @@ function App() {
                             }}
                             disabled={!isEditingSettings}
                             className="settings-input"
-                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '1.15rem', boxSizing: 'border-box' }}
+                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '0.95rem', boxSizing: 'border-box' }}
                           />
                           <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
                             {isEditingSettings ? (
@@ -7372,12 +7754,13 @@ function App() {
 
                       {/* Time */}
                       <div className="settings-input-group" style={{ width: '100%', marginTop: '0', marginBottom: '0' }}>
-                        <label htmlFor="time" style={{ fontSize: '1.1rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500', marginTop: '0' }}>Time</label>
+                        <label htmlFor="time" style={{ fontSize: '0.9rem', marginBottom: '0.6rem', display: 'block', fontWeight: '500', marginTop: '0' }}>Time</label>
                         <div className="settings-input-wrapper" style={{ width: '100%' }}>
                           <input
                             type="time"
                             id="time"
                             name="time"
+                            autoComplete="off"
                             value={settings.time}
                             onChange={(e) => {
                               setSettings({ ...settings, time: e.target.value })
@@ -7385,7 +7768,7 @@ function App() {
                             }}
                             disabled={!isEditingSettings}
                             className="settings-input"
-                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '1.15rem', boxSizing: 'border-box' }}
+                            style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '0.95rem', boxSizing: 'border-box' }}
                           />
                           <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
                             {isEditingSettings ? (
@@ -7403,15 +7786,15 @@ function App() {
                         </div>
                       </div>
                     </div>
-                  </div>
                     </div>
+                  </div>
                   )}
                   
                   {activeSettingsSection === 'Team members' && (
-                  <div className="settings-form" style={{ marginLeft: '-200px', position: 'relative', zIndex: 100, width: 'calc(100% + 200px)', maxWidth: 'none', boxSizing: 'border-box', overflowX: 'hidden', overflowY: 'visible' }}>
-                    <div style={{ display: 'flex', gap: '2rem', width: '100%', alignItems: 'flex-start', boxSizing: 'border-box', paddingRight: '0', overflowX: 'hidden', overflowY: 'visible' }}>
+                  <div className="settings-form team-members-container" style={{ marginLeft: '0', position: 'relative', zIndex: 100, width: '100%', maxWidth: '100%', boxSizing: 'border-box', overflowX: 'hidden', overflowY: 'visible' }}>
+                    <div className="team-members-wrapper" style={{ display: 'flex', flexWrap: 'nowrap', gap: '1.5rem', width: '100%', alignItems: 'flex-start', boxSizing: 'border-box', paddingRight: '0', overflowX: 'hidden', overflowY: 'hidden', height: 'calc(100vh - 200px)' }}>
                       {/* Employees List */}
-                      <div style={{ flex: '1 1 auto', minWidth: 0, overflowX: 'hidden', overflowY: 'visible', width: '100%' }}>
+                      <div style={{ flex: '1 1 0', minWidth: '280px', height: '100%', overflowX: 'hidden', overflowY: 'auto', boxSizing: 'border-box' }}>
                         {teamMembers.length === 0 ? (
                           <p style={{ color: '#666', fontStyle: 'italic' }}>No employees added yet.</p>
                         ) : (
@@ -7419,50 +7802,36 @@ function App() {
                             {teamMembers.map((employee) => (
                             <div
                               key={employee.id}
+                              className="team-member-card"
                               style={{
                                 padding: '1.25rem 1.25rem',
                                 backgroundColor: '#ffffff',
                                 borderRadius: '8px',
                                 border: '1px solid #e0e0e0',
                                 display: 'flex',
-                                flexDirection: 'column',
+                                flexDirection: 'row',
                                 gap: '1.25rem',
                                 overflowX: 'visible',
                                 overflowY: 'visible',
-                                minWidth: '900px',
                                 width: '100%',
                                 maxWidth: '100%',
-                                boxSizing: 'border-box'
+                                boxSizing: 'border-box',
+                                alignItems: 'center'
                               }}
                             >
                               {editingEmployeeId === employee.id ? (
                                 // Edit Form
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', overflowX: 'visible', overflowY: 'visible' }}>
-                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.75rem', width: '100%', alignItems: 'flex-start', overflowX: 'visible', overflowY: 'visible' }}>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1.5rem', width: '100%', minWidth: 0, overflowX: 'visible', overflowY: 'visible', maxWidth: '100%', boxSizing: 'border-box' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'row', gap: '1.5rem', flex: 1, alignItems: 'flex-start', minWidth: 0, overflowX: 'visible', overflowY: 'visible', flexWrap: 'wrap' }}>
                                     <div className="settings-input-group" style={{ overflowX: 'visible', overflowY: 'visible' }}>
                                       <label htmlFor={`employee-name-edit-${employee.id}`} style={{ fontSize: '0.85rem', fontWeight: '600', color: '#1e3a5f', marginBottom: '0.25rem', whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word', overflowX: 'visible', overflowY: 'visible', maxWidth: '100%' }}>Name</label>
                                       <input
                                         type="text"
                                         id={`employee-name-edit-${employee.id}`}
                                         name={`employee-name-edit-${employee.id}`}
+                                        autoComplete="name"
                                         value={editingEmployee.name}
                                         onChange={(e) => setEditingEmployee({ ...editingEmployee, name: e.target.value })}
-                                        className="settings-input"
-                                        style={{ width: '100%' }}
-                                      />
-                                    </div>
-                                    <div className="settings-input-group" style={{ overflowX: 'visible', overflowY: 'visible' }}>
-                                      <label htmlFor={`employee-dob-edit-${employee.id}`} style={{ fontSize: '0.85rem', fontWeight: '600', color: '#1e3a5f', marginBottom: '0.25rem', whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word', overflowX: 'visible', overflowY: 'visible', maxWidth: '100%' }}>Date of Birth</label>
-                                      <input
-                                        type="text"
-                                        id={`employee-dob-edit-${employee.id}`}
-                                        name={`employee-dob-edit-${employee.id}`}
-                                        value={editingEmployee.age}
-                                        onChange={(e) => {
-                                          const formatted = formatDateInput(e.target.value)
-                                          setEditingEmployee({ ...editingEmployee, age: formatted })
-                                        }}
-                                        placeholder="mm/dd/yyyy"
                                         className="settings-input"
                                         style={{ width: '100%' }}
                                       />
@@ -7473,6 +7842,7 @@ function App() {
                                         type="tel"
                                         id={`employee-contact-edit-${employee.id}`}
                                         name={`employee-contact-edit-${employee.id}`}
+                                        autoComplete="tel"
                                         value={editingEmployee.contact}
                                         onChange={(e) => {
                                           const formatted = formatPhoneInput(e.target.value)
@@ -7488,8 +7858,26 @@ function App() {
                                         type="email"
                                         id={`employee-email-edit-${employee.id}`}
                                         name={`employee-email-edit-${employee.id}`}
+                                        autoComplete="email"
                                         value={editingEmployee.email}
                                         onChange={(e) => setEditingEmployee({ ...editingEmployee, email: e.target.value })}
+                                        className="settings-input"
+                                        style={{ width: '100%' }}
+                                      />
+                                    </div>
+                                    <div className="settings-input-group" style={{ overflowX: 'visible', overflowY: 'visible' }}>
+                                      <label htmlFor={`employee-dob-edit-${employee.id}`} style={{ fontSize: '0.85rem', fontWeight: '600', color: '#1e3a5f', marginBottom: '0.25rem', whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word', overflowX: 'visible', overflowY: 'visible', maxWidth: '100%' }}>Date of Birth</label>
+                                      <input
+                                        type="text"
+                                        id={`employee-dob-edit-${employee.id}`}
+                                        name={`employee-dob-edit-${employee.id}`}
+                                        autoComplete="bday"
+                                        value={editingEmployee.age}
+                                        onChange={(e) => {
+                                          const formatted = formatDateInput(e.target.value)
+                                          setEditingEmployee({ ...editingEmployee, age: formatted })
+                                        }}
+                                        placeholder="mm/dd/yyyy"
                                         className="settings-input"
                                         style={{ width: '100%' }}
                                       />
@@ -7500,6 +7888,7 @@ function App() {
                                         type="tel"
                                         id={`employee-emergency-edit-${employee.id}`}
                                         name={`employee-emergency-edit-${employee.id}`}
+                                        autoComplete="tel"
                                         value={editingEmployee.emergencyContact}
                                         onChange={(e) => {
                                           const formatted = formatEmergencyContact(e.target.value)
@@ -7529,6 +7918,7 @@ function App() {
                                         type="password"
                                         id={`employee-password-edit-${employee.id}`}
                                         name={`employee-password-edit-${employee.id}`}
+                                        autoComplete="new-password"
                                         value={editingEmployee.password || ''}
                                         onChange={(e) => setEditingEmployee({ ...editingEmployee, password: e.target.value })}
                                         placeholder="Enter password for clock-in access"
@@ -7537,28 +7927,7 @@ function App() {
                                       />
                                     </div>
                                   </div>
-                                  <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                                    <button
-                                      onClick={() => {
-                                        setEditingEmployeeId(null)
-                                        setEditingEmployee({ name: '', age: '', contact: '', email: '', emergencyContact: '', hourlyPay: '', password: '' })
-                                      }}
-                                      style={{
-                                        padding: '0.5rem 1rem',
-                                        backgroundColor: '#6c757d',
-                                        color: 'white',
-                                        border: 'none',
-                                        borderRadius: '6px',
-                                        cursor: 'pointer',
-                                        fontSize: '0.9rem',
-                                        fontWeight: '600',
-                                        transition: 'background-color 0.2s'
-                                      }}
-                                      onMouseOver={(e) => e.target.style.backgroundColor = '#5a6268'}
-                                      onMouseOut={(e) => e.target.style.backgroundColor = '#6c757d'}
-                                    >
-                                      Cancel
-                                    </button>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', flexShrink: 0, minWidth: '105px', justifyContent: 'center' }}>
                                     <button
                                       onClick={() => {
                                         if (editingEmployee.name && editingEmployee.age && editingEmployee.contact && editingEmployee.email && editingEmployee.emergencyContact && editingEmployee.password) {
@@ -7574,53 +7943,76 @@ function App() {
                                         }
                                       }}
                                       style={{
-                                        padding: '0.5rem 1rem',
+                                        padding: '0.6rem 1rem',
                                         backgroundColor: '#28a745',
                                         color: 'white',
                                         border: 'none',
                                         borderRadius: '6px',
                                         cursor: 'pointer',
-                                        fontSize: '0.9rem',
+                                        fontSize: '1.05rem',
                                         fontWeight: '600',
-                                        transition: 'background-color 0.2s'
+                                        transition: 'background-color 0.2s',
+                                        width: '100%'
                                       }}
                                       onMouseOver={(e) => e.target.style.backgroundColor = '#218838'}
                                       onMouseOut={(e) => e.target.style.backgroundColor = '#28a745'}
                                     >
                                       Save
                                     </button>
+                                    <button
+                                      onClick={() => {
+                                        setEditingEmployeeId(null)
+                                        setEditingEmployee({ name: '', age: '', contact: '', email: '', emergencyContact: '', hourlyPay: '', password: '' })
+                                      }}
+                                      style={{
+                                        padding: '0.6rem 1rem',
+                                        backgroundColor: '#6c757d',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '6px',
+                                        cursor: 'pointer',
+                                        fontSize: '1.05rem',
+                                        fontWeight: '600',
+                                        transition: 'background-color 0.2s',
+                                        width: '100%'
+                                      }}
+                                      onMouseOver={(e) => e.target.style.backgroundColor = '#5a6268'}
+                                      onMouseOut={(e) => e.target.style.backgroundColor = '#6c757d'}
+                                    >
+                                      Cancel
+                                    </button>
                                   </div>
                                 </div>
                               ) : (
                                 // Display View
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem', width: '100%', minWidth: 0, overflowX: 'visible', overflowY: 'visible', maxWidth: '100%', boxSizing: 'border-box' }}>
-                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem 1.5rem', flex: 1, alignItems: 'flex-start', minWidth: 0, overflowX: 'visible', overflowY: 'visible', width: '100%' }}>
-                                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', minWidth: 0, overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>
-                                      <strong style={{ color: '#1e3a5f', fontSize: '0.9rem', overflowWrap: 'break-word', wordBreak: 'break-word', whiteSpace: 'normal', maxWidth: '100%', marginBottom: '0.15rem' }}>Name:</strong>
-                                      <div style={{ color: '#333', fontSize: '1rem', wordBreak: 'break-word', overflowWrap: 'break-word', overflowX: 'hidden', overflowY: 'visible', whiteSpace: 'normal', maxWidth: '100%' }}>{employee.name}</div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', width: '100%', minWidth: 0, overflowX: 'visible', overflowY: 'visible', maxWidth: '100%', boxSizing: 'border-box', alignContent: 'center' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'row', gap: '2rem', flex: 1, alignItems: 'center', justifyContent: 'flex-start', minWidth: 0, overflowX: 'visible', overflowY: 'visible', flexWrap: 'nowrap', alignContent: 'center' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'flex-start', minWidth: 0, flexShrink: 0, alignSelf: 'center', verticalAlign: 'top', marginTop: 0, paddingTop: 0 }}>
+                                      <strong style={{ color: '#1e3a5f', fontSize: '1.05rem', whiteSpace: 'nowrap', marginBottom: '0.3rem', lineHeight: '1.2', display: 'block', marginTop: 0, paddingTop: 0, verticalAlign: 'top', height: 'auto', minHeight: '1.26rem' }}>Name:</strong>
+                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.name}</div>
                                     </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', minWidth: 0, overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>
-                                      <strong style={{ color: '#1e3a5f', fontSize: '0.9rem', overflowWrap: 'break-word', wordBreak: 'break-word', whiteSpace: 'normal', maxWidth: '100%', marginBottom: '0.15rem' }}>Contact:</strong>
-                                      <div style={{ color: '#333', fontSize: '1rem', wordBreak: 'break-word', overflowWrap: 'break-word', overflowX: 'hidden', overflowY: 'visible', whiteSpace: 'normal', maxWidth: '100%' }}>{employee.contact}</div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'flex-start', minWidth: 0, flexShrink: 0, alignSelf: 'center', verticalAlign: 'top', marginTop: 0, paddingTop: 0 }}>
+                                      <strong style={{ color: '#1e3a5f', fontSize: '1.05rem', whiteSpace: 'nowrap', marginBottom: '0.3rem', lineHeight: '1.2', display: 'block', marginTop: 0, paddingTop: 0, verticalAlign: 'top', height: 'auto', minHeight: '1.26rem' }}>Contact:</strong>
+                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.contact}</div>
                                     </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', minWidth: 0, overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>
-                                      <strong style={{ color: '#1e3a5f', fontSize: '0.9rem', overflowWrap: 'break-word', wordBreak: 'break-word', whiteSpace: 'normal', maxWidth: '100%', marginBottom: '0.15rem' }}>Email:</strong>
-                                      <div style={{ color: '#333', fontSize: '1rem', wordBreak: 'break-word', overflowWrap: 'break-word', overflowX: 'hidden', overflowY: 'visible', whiteSpace: 'normal', maxWidth: '100%' }}>{employee.email || 'N/A'}</div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'flex-start', minWidth: 0, flexShrink: 0, alignSelf: 'center', verticalAlign: 'top', marginTop: 0, paddingTop: 0 }}>
+                                      <strong style={{ color: '#1e3a5f', fontSize: '1.05rem', whiteSpace: 'nowrap', marginBottom: '0.3rem', lineHeight: '1.2', display: 'block', marginTop: 0, paddingTop: 0, verticalAlign: 'top', height: 'auto', minHeight: '1.26rem' }}>Email:</strong>
+                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.email || 'N/A'}</div>
                                     </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', minWidth: 0, overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>
-                                      <strong style={{ color: '#1e3a5f', fontSize: '0.9rem', overflowWrap: 'break-word', wordBreak: 'break-word', whiteSpace: 'normal', maxWidth: '100%', marginBottom: '0.15rem' }}>Date of Birth:</strong>
-                                      <div style={{ color: '#333', fontSize: '1rem', wordBreak: 'break-word', overflowWrap: 'break-word', overflowX: 'hidden', overflowY: 'visible', whiteSpace: 'normal', maxWidth: '100%' }}>{employee.age ? new Date(employee.age).toLocaleDateString() : 'N/A'}</div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'flex-start', minWidth: 0, flexShrink: 0, alignSelf: 'center', verticalAlign: 'top', marginTop: 0, paddingTop: 0 }}>
+                                      <strong style={{ color: '#1e3a5f', fontSize: '1.05rem', whiteSpace: 'nowrap', marginBottom: '0.3rem', lineHeight: '1.2', display: 'block', marginTop: 0, paddingTop: 0, verticalAlign: 'top', height: 'auto', minHeight: '1.26rem' }}>Date of Birth:</strong>
+                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.age ? new Date(employee.age).toLocaleDateString() : 'N/A'}</div>
                                     </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', minWidth: 0, overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>
-                                      <strong style={{ color: '#1e3a5f', fontSize: '0.9rem', overflowWrap: 'break-word', wordBreak: 'break-word', whiteSpace: 'normal', maxWidth: '100%', marginBottom: '0.15rem' }}>Emergency Contact:</strong>
-                                      <div style={{ color: '#333', fontSize: '1rem', wordBreak: 'break-word', overflowWrap: 'break-word', overflowX: 'hidden', overflowY: 'visible', whiteSpace: 'normal', maxWidth: '100%' }}>{employee.emergencyContact}</div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'flex-start', minWidth: 0, flexShrink: 0, alignSelf: 'center', verticalAlign: 'top', marginTop: 0, paddingTop: 0 }}>
+                                      <strong style={{ color: '#1e3a5f', fontSize: '1.05rem', whiteSpace: 'nowrap', marginBottom: '0.3rem', lineHeight: '1.2', display: 'block', marginTop: 0, paddingTop: 0, verticalAlign: 'top', height: 'auto', minHeight: '1.26rem' }}>Emergency Contact:</strong>
+                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.emergencyContact}</div>
                                     </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', minWidth: 0, overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>
-                                      <strong style={{ color: '#1e3a5f', fontSize: '0.9rem', overflowWrap: 'break-word', wordBreak: 'break-word', whiteSpace: 'normal', maxWidth: '100%', marginBottom: '0.15rem' }}>Hourly Pay:</strong>
-                                      <div style={{ color: '#333', fontSize: '1rem', wordBreak: 'break-word', overflowWrap: 'break-word', overflowX: 'hidden', overflowY: 'visible', whiteSpace: 'normal', maxWidth: '100%' }}>{employee.hourlyPay ? `$${employee.hourlyPay}` : 'N/A'}</div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'flex-start', minWidth: 0, flexShrink: 0, alignSelf: 'center', verticalAlign: 'top', marginTop: 0, paddingTop: 0 }}>
+                                      <strong style={{ color: '#1e3a5f', fontSize: '1.05rem', whiteSpace: 'nowrap', marginBottom: '0.3rem', lineHeight: '1.2', display: 'block', marginTop: 0, paddingTop: 0, verticalAlign: 'top', height: 'auto', minHeight: '1.26rem' }}>Hourly Pay:</strong>
+                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.hourlyPay ? `$${employee.hourlyPay}` : 'N/A'}</div>
                                     </div>
                                   </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', flexShrink: 0, minWidth: '105px', justifyContent: 'center' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', flexShrink: 0, minWidth: '105px', justifyContent: 'center', alignSelf: 'center' }}>
                                     <button
                                       onClick={() => {
                                         setEditingEmployeeId(employee.id)
@@ -7644,7 +8036,8 @@ function App() {
                                         fontSize: '1.05rem',
                                         fontWeight: '600',
                                         transition: 'background-color 0.2s',
-                                        width: '100%'
+                                        width: '100%',
+                                        marginTop: '0.3rem'
                                       }}
                                       onMouseOver={(e) => e.target.style.backgroundColor = '#218838'}
                                       onMouseOut={(e) => e.target.style.backgroundColor = '#28a745'}
@@ -7666,7 +8059,8 @@ function App() {
                                         fontSize: '1.05rem',
                                         fontWeight: '600',
                                         transition: 'background-color 0.2s',
-                                        width: '100%'
+                                        width: '100%',
+                                        marginBottom: '0.3rem'
                                       }}
                                       onMouseOver={(e) => e.target.style.backgroundColor = '#c82333'}
                                       onMouseOut={(e) => e.target.style.backgroundColor = '#dc3545'}
@@ -7683,28 +8077,27 @@ function App() {
                       </div>
                       
                       {/* Add Employee Form */}
-                      <div style={{ padding: '1.5rem', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', width: '450px', flexShrink: 0, marginLeft: '0', marginRight: '0', maxWidth: '450px', boxSizing: 'border-box', position: 'relative', zIndex: 101, display: 'flex', flexDirection: 'column', alignItems: 'center', overflowX: 'hidden', overflowY: 'visible', minHeight: '680px' }}>
-                      <h3 style={{ marginBottom: '1rem', fontSize: '1.15rem', fontWeight: '600', color: '#333', textAlign: 'center', whiteSpace: 'normal', overflowWrap: 'break-word', wordBreak: 'break-word', overflowX: 'hidden', overflowY: 'visible', width: '100%', maxWidth: '100%', minWidth: 0, padding: '0', boxSizing: 'border-box', lineHeight: '1.3', display: 'block' }}>Add New Employee</h3>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', alignItems: 'center', overflowX: 'hidden', overflowY: 'visible' }}>
+                      <div className="add-employee-form" style={{ padding: '1.5rem', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', flex: '0 0 420px', minWidth: '280px', maxWidth: '470px', boxSizing: 'border-box', position: 'sticky', top: '0', zIndex: 101, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between', overflowX: 'hidden', overflowY: 'visible', resize: 'none', height: 'calc(100vh - 200px)', alignSelf: 'flex-start' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem', width: '100%', alignItems: 'center', overflowX: 'hidden', overflowY: 'visible', flex: 1, justifyContent: 'space-evenly' }}>
                         <div className="settings-input-group" style={{ width: '100%' }}>
-                          <label htmlFor="employee-name-new">Name</label>
                           <input
                             type="text"
                             id="employee-name-new"
                             name="employee-name-new"
+                            autoComplete="name"
                             value={newEmployee.name}
                             onChange={(e) => setNewEmployee({ ...newEmployee, name: e.target.value })}
                             placeholder="Enter employee name"
                             className="settings-input"
-                            style={{ width: '100%' }}
+                            style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
                           />
                         </div>
                         <div className="settings-input-group" style={{ maxWidth: '350px', width: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
-                          <label htmlFor="employee-dob-new" style={{ whiteSpace: 'normal', overflowWrap: 'break-word', wordBreak: 'break-word', overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>Date of Birth</label>
                           <input
                             type="text"
                             id="employee-dob-new"
                             name="employee-dob-new"
+                            autoComplete="bday"
                             value={newEmployee.age}
                             onChange={(e) => {
                               const formatted = formatDateInput(e.target.value)
@@ -7712,28 +8105,28 @@ function App() {
                             }}
                             placeholder="mm/dd/yyyy"
                             className="settings-input"
-                            style={{ width: '100%' }}
+                            style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
                           />
                         </div>
                         <div className="settings-input-group" style={{ maxWidth: '350px', width: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
-                          <label htmlFor="employee-email-new" style={{ whiteSpace: 'normal', overflowWrap: 'break-word', wordBreak: 'break-word', overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>Email</label>
                           <input
                             type="email"
                             id="employee-email-new"
                             name="employee-email-new"
+                            autoComplete="email"
                             value={newEmployee.email}
                             onChange={(e) => setNewEmployee({ ...newEmployee, email: e.target.value })}
                             placeholder="Enter email address"
                             className="settings-input"
-                            style={{ width: '100%' }}
+                            style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
                           />
                         </div>
                         <div className="settings-input-group" style={{ maxWidth: '350px', width: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
-                          <label htmlFor="employee-phone-new" style={{ whiteSpace: 'normal', overflowWrap: 'break-word', wordBreak: 'break-word', overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>Phone number</label>
                           <input
                             type="tel"
                             id="employee-phone-new"
                             name="employee-phone-new"
+                            autoComplete="tel"
                             value={newEmployee.contact}
                             onChange={(e) => {
                               const formatted = formatPhoneInput(e.target.value)
@@ -7741,15 +8134,15 @@ function App() {
                             }}
                             placeholder="Enter phone number"
                             className="settings-input"
-                            style={{ width: '100%' }}
+                            style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
                           />
                         </div>
                         <div className="settings-input-group" style={{ maxWidth: '350px', width: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
-                          <label htmlFor="employee-emergency-new" style={{ whiteSpace: 'normal', overflowWrap: 'break-word', wordBreak: 'break-word', overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>Emergency contact</label>
                           <input
                             type="text"
                             id="employee-emergency-new"
                             name="employee-emergency-new"
+                            autoComplete="tel"
                             value={newEmployee.emergencyContact}
                             onChange={(e) => {
                               const formatted = formatEmergencyContact(e.target.value)
@@ -7757,11 +8150,10 @@ function App() {
                             }}
                             placeholder="Enter email or phone number"
                             className="settings-input"
-                            style={{ width: '100%' }}
+                            style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
                           />
                         </div>
                         <div className="settings-input-group" style={{ maxWidth: '350px', width: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
-                          <label htmlFor="employee-hourly-pay-new" style={{ whiteSpace: 'normal', overflowWrap: 'break-word', wordBreak: 'break-word', overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>Hourly Pay</label>
                           <input
                             type="number"
                             id="employee-hourly-pay-new"
@@ -7770,22 +8162,22 @@ function App() {
                             onChange={(e) => setNewEmployee({ ...newEmployee, hourlyPay: e.target.value })}
                             placeholder="Enter hourly pay rate"
                             className="settings-input"
-                            style={{ width: '100%' }}
+                            style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
                             min="0"
                             step="0.01"
                           />
                         </div>
                         <div className="settings-input-group" style={{ maxWidth: '350px', width: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
-                          <label htmlFor="employee-password-new" style={{ whiteSpace: 'normal', overflowWrap: 'break-word', wordBreak: 'break-word', overflowX: 'hidden', overflowY: 'visible', maxWidth: '100%' }}>Password</label>
                           <input
                             type="password"
                             id="employee-password-new"
                             name="employee-password-new"
+                            autoComplete="new-password"
                             value={newEmployee.password}
                             onChange={(e) => setNewEmployee({ ...newEmployee, password: e.target.value })}
                             placeholder="Enter password for clock-in access"
                             className="settings-input"
-                            style={{ width: '100%' }}
+                            style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
                           />
                         </div>
                       </div>
@@ -7809,7 +8201,7 @@ function App() {
                           }
                         }}
                         style={{
-                          marginTop: '1rem',
+                          marginTop: '1.5rem',
                           padding: '0.75rem 1.5rem',
                           backgroundColor: '#1e3a5f',
                           color: 'white',
@@ -7819,8 +8211,9 @@ function App() {
                           fontSize: '1rem',
                           fontWeight: '600',
                           transition: 'background-color 0.2s',
-                          width: '350px',
-                          maxWidth: '100%'
+                          width: '100%',
+                          maxWidth: '350px',
+                          flexShrink: 0
                         }}
                         onMouseOver={(e) => e.target.style.backgroundColor = '#2a4f7a'}
                         onMouseOut={(e) => e.target.style.backgroundColor = '#1e3a5f'}
@@ -8018,10 +8411,7 @@ function App() {
                   
                   {activeSettingsSection === 'Edit time-sheets' && (
                   <div className="settings-form" style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
-                    <h2 style={{ marginBottom: '1rem', fontSize: '1.75rem', fontWeight: '700', color: '#1e3a5f', flexShrink: 0 }}>Edit Time-sheets</h2>
-                    <p style={{ marginBottom: '2rem', color: '#666', fontSize: '1.1rem', flexShrink: 0 }}>
-                      Manually edit employee clock in/out times and breaks. Use this if an employee forgot to clock in or out.
-                    </p>
+                    <h2 style={{ marginBottom: '1.5rem', fontSize: '1.75rem', fontWeight: '700', color: '#1e3a5f', flexShrink: 0 }}>Edit Time-sheets</h2>
 
                     {teamMembers.length === 0 ? (
                       <div style={{ 
@@ -8178,8 +8568,8 @@ function App() {
                               </div>
 
                               {/* Breaks Section */}
-                              <div style={{ marginBottom: '2rem', flex: 1 }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                              <div style={{ marginBottom: '2rem', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexShrink: 0 }}>
                                   <label style={{ fontWeight: '700', color: '#333', fontSize: '1.1rem' }}>Breaks</label>
                                   <button
                                     onClick={addBreakToEdit}
@@ -8205,95 +8595,98 @@ function App() {
                                   </button>
                                 </div>
 
-                                {timesheetEditData.breaks.length === 0 ? (
-                                  <div style={{ 
-                                    padding: '1.5rem', 
-                                    backgroundColor: '#fff', 
-                                    borderRadius: '10px', 
-                                    border: '2px dashed #ddd',
-                                    textAlign: 'center',
-                                    color: '#999',
-                                    fontSize: '1.05rem'
-                                  }}>
-                                    No breaks recorded. Click "Add Break" to add one.
-                                  </div>
-                                ) : (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                    {timesheetEditData.breaks.map((brk, index) => (
-                                      <div 
-                                        key={index} 
-                                        style={{ 
-                                          display: 'grid', 
-                                          gridTemplateColumns: '1fr 1fr auto', 
-                                          gap: '1.5rem', 
-                                          alignItems: 'end',
-                                          padding: '1.25rem',
-                                          backgroundColor: '#fff',
-                                          borderRadius: '10px',
-                                          border: '2px solid #e0e0e0'
-                                        }}
-                                      >
-                                        <div>
-                                          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '1rem', color: '#666', fontWeight: '600' }}>Break Start</label>
-                                          <input
-                                            type="time"
-                                            value={brk.breakOut}
-                                            onChange={(e) => updateBreakInEdit(index, 'breakOut', e.target.value)}
-                                            style={{
-                                              width: '100%',
-                                              padding: '0.85rem 1rem',
-                                              border: '2px solid #ddd',
-                                              borderRadius: '8px',
-                                              fontSize: '1.15rem',
-                                              fontWeight: '500'
-                                            }}
-                                          />
-                                        </div>
-                                        <div>
-                                          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '1rem', color: '#666', fontWeight: '600' }}>Break End</label>
-                                          <input
-                                            type="time"
-                                            value={brk.breakIn}
-                                            onChange={(e) => updateBreakInEdit(index, 'breakIn', e.target.value)}
-                                            style={{
-                                              width: '100%',
-                                              padding: '0.85rem 1rem',
-                                              border: '2px solid #ddd',
-                                              borderRadius: '8px',
-                                              fontSize: '1.15rem',
-                                              fontWeight: '500'
-                                            }}
-                                          />
-                                        </div>
-                                        <button
-                                          onClick={() => removeBreakFromEdit(index)}
-                                          style={{
-                                            padding: '0.75rem',
-                                            backgroundColor: '#ffebee',
-                                            color: '#c62828',
-                                            border: '2px solid #ef9a9a',
-                                            borderRadius: '8px',
-                                            cursor: 'pointer',
-                                            height: '48px',
-                                            width: '48px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center'
+                                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                                  {timesheetEditData.breaks.length === 0 ? (
+                                    <div style={{ 
+                                      padding: '1.5rem', 
+                                      backgroundColor: '#fff', 
+                                      borderRadius: '10px', 
+                                      border: '2px dashed #ddd',
+                                      textAlign: 'center',
+                                      color: '#999',
+                                      fontSize: '1.05rem'
+                                    }}>
+                                      No breaks recorded. Click "Add Break" to add one.
+                                    </div>
+                                  ) : (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                      {timesheetEditData.breaks.map((brk, index) => (
+                                        <div 
+                                          key={index} 
+                                          style={{ 
+                                            display: 'grid', 
+                                            gridTemplateColumns: '1fr 1fr auto', 
+                                            gap: '1.5rem', 
+                                            alignItems: 'end',
+                                            padding: '1.25rem',
+                                            backgroundColor: '#fff',
+                                            borderRadius: '10px',
+                                            border: '2px solid #e0e0e0',
+                                            flexShrink: 0
                                           }}
                                         >
-                                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                            <line x1="18" y1="6" x2="6" y2="18"></line>
-                                            <line x1="6" y1="6" x2="18" y2="18"></line>
-                                          </svg>
-                                        </button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
+                                          <div>
+                                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '1rem', color: '#666', fontWeight: '600' }}>Break Start</label>
+                                            <input
+                                              type="time"
+                                              value={brk.breakOut}
+                                              onChange={(e) => updateBreakInEdit(index, 'breakOut', e.target.value)}
+                                              style={{
+                                                width: '100%',
+                                                padding: '0.85rem 1rem',
+                                                border: '2px solid #ddd',
+                                                borderRadius: '8px',
+                                                fontSize: '1.15rem',
+                                                fontWeight: '500'
+                                              }}
+                                            />
+                                          </div>
+                                          <div>
+                                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '1rem', color: '#666', fontWeight: '600' }}>Break End</label>
+                                            <input
+                                              type="time"
+                                              value={brk.breakIn}
+                                              onChange={(e) => updateBreakInEdit(index, 'breakIn', e.target.value)}
+                                              style={{
+                                                width: '100%',
+                                                padding: '0.85rem 1rem',
+                                                border: '2px solid #ddd',
+                                                borderRadius: '8px',
+                                                fontSize: '1.15rem',
+                                                fontWeight: '500'
+                                              }}
+                                            />
+                                          </div>
+                                          <button
+                                            onClick={() => removeBreakFromEdit(index)}
+                                            style={{
+                                              padding: '0.75rem',
+                                              backgroundColor: '#ffebee',
+                                              color: '#c62828',
+                                              border: '2px solid #ef9a9a',
+                                              borderRadius: '8px',
+                                              cursor: 'pointer',
+                                              height: '48px',
+                                              width: '48px',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'center'
+                                            }}
+                                          >
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                              <line x1="18" y1="6" x2="6" y2="18"></line>
+                                              <line x1="6" y1="6" x2="18" y2="18"></line>
+                                            </svg>
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
                               </div>
 
                               {/* Save Button */}
-                              <div style={{ display: 'flex', gap: '1.5rem', justifyContent: 'flex-end', marginTop: 'auto', paddingTop: '1.5rem' }}>
+                              <div style={{ display: 'flex', gap: '1.5rem', justifyContent: 'flex-end', paddingTop: '1.5rem', flexShrink: 0 }}>
                                 <button
                                   onClick={() => {
                                     setTimesheetEditEmployee(null)
@@ -8560,25 +8953,25 @@ function App() {
                               }}
                             >
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '1.5rem', width: '100%' }}>
-                                <div>
-                                  <strong style={{ color: '#1e3a5f', display: 'block', marginBottom: '0.5rem' }}>Name:</strong>
-                                  <div style={{ color: '#333' }}>{employee.name}</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                                  <strong style={{ color: '#1e3a5f', display: 'block', marginBottom: '0.3rem', fontSize: '1.05rem', whiteSpace: 'nowrap', lineHeight: '1.2' }}>Name:</strong>
+                                  <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '1.2' }}>{employee.name}</div>
                                 </div>
-                                <div>
-                                  <strong style={{ color: '#1e3a5f', display: 'block', marginBottom: '0.5rem' }}>Date of Birth:</strong>
-                                  <div style={{ color: '#333' }}>{employee.age ? new Date(employee.age).toLocaleDateString() : 'N/A'}</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                                  <strong style={{ color: '#1e3a5f', display: 'block', marginBottom: '0.3rem', fontSize: '1.05rem', whiteSpace: 'nowrap', lineHeight: '1.2' }}>Date of Birth:</strong>
+                                  <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '1.2' }}>{employee.age ? new Date(employee.age).toLocaleDateString() : 'N/A'}</div>
                                 </div>
-                                <div>
-                                  <strong style={{ color: '#1e3a5f', display: 'block', marginBottom: '0.5rem' }}>Contact:</strong>
-                                  <div style={{ color: '#333' }}>{employee.contact}</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                                  <strong style={{ color: '#1e3a5f', display: 'block', marginBottom: '0.3rem', fontSize: '1.05rem', whiteSpace: 'nowrap', lineHeight: '1.2' }}>Contact:</strong>
+                                  <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '1.2' }}>{employee.contact}</div>
                                 </div>
-                                <div>
-                                  <strong style={{ color: '#1e3a5f', display: 'block', marginBottom: '0.5rem' }}>Email:</strong>
-                                  <div style={{ color: '#333' }}>{employee.email || 'N/A'}</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                                  <strong style={{ color: '#1e3a5f', display: 'block', marginBottom: '0.3rem', fontSize: '1.05rem', whiteSpace: 'nowrap', lineHeight: '1.2' }}>Email:</strong>
+                                  <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '1.2' }}>{employee.email || 'N/A'}</div>
                                 </div>
-                                <div>
-                                  <strong style={{ color: '#1e3a5f', display: 'block', marginBottom: '0.5rem' }}>Emergency Contact:</strong>
-                                  <div style={{ color: '#333' }}>{employee.emergencyContact}</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                                  <strong style={{ color: '#1e3a5f', display: 'block', marginBottom: '0.3rem', fontSize: '1.05rem', whiteSpace: 'nowrap', lineHeight: '1.2' }}>Emergency Contact:</strong>
+                                  <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '1.2' }}>{employee.emergencyContact}</div>
                                 </div>
                               </div>
                               
@@ -8737,10 +9130,10 @@ function App() {
                   <div className="tos-view" style={{ 
                     display: 'flex', 
                     flexDirection: 'column', 
-                    height: '100%', 
                     maxWidth: '900px', 
                     margin: '0 auto',
-                    padding: '2rem'
+                    padding: '2rem',
+                    width: '100%'
                   }}>
                     {!tosAgreed && (
                       <div style={{
@@ -8755,19 +9148,11 @@ function App() {
                         ⚠️ You must scroll to the bottom and click "I Agree" before you can navigate away from this page.
                       </div>
                     )}
-                    <h2 style={{ marginBottom: '2rem', fontSize: '1.5rem', fontWeight: '600', color: '#1e3a5f' }}>Terms and Conditions</h2>
                     
                     <div 
                       ref={tosContentRef}
                       className="tos-content"
-                      onScroll={(e) => {
-                        const element = e.target
-                        const isAtBottom = element.scrollHeight - element.scrollTop <= element.clientHeight + 10
-                        setTosScrolledToBottom(isAtBottom)
-                      }}
                       style={{
-                        flex: 1,
-                        overflowY: 'auto',
                         padding: '1.5rem',
                         backgroundColor: '#ffffff',
                         border: '2px solid #e0e0e0',
@@ -9418,7 +9803,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
               </button>
               <button 
                 className={`nav-footer-btn ${activeView === null ? 'active' : ''}`}
-                onClick={() => setActiveView(null)}
+                onClick={() => goToPage(null)}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
@@ -9428,7 +9813,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
               </button>
               <button 
                 className={`nav-footer-btn ${activeView === 'Transaction' ? 'active' : ''}`}
-                onClick={() => setActiveView('Transaction')}
+                onClick={() => goToPage('Transaction')}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
@@ -9438,7 +9823,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
               </button>
               <button 
                 className={`nav-footer-btn ${activeView === 'Timesheets' ? 'active' : ''}`}
-                onClick={() => setActiveView('Timesheets')}
+                onClick={() => goToPage('Timesheets')}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -9451,7 +9836,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
               </button>
               <button 
                 className={`nav-footer-btn ${activeView === 'Settings' ? 'active' : ''}`}
-                onClick={() => setActiveView('Settings')}
+                onClick={() => goToPage('Settings')}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
@@ -10167,20 +10552,20 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
           </div>
         )}
 
-          {/* Right Panel - Order */}
-          <div className="order-panel">
-          <div className="order-header">
-            <h2>Current Order</h2>
-            <div className="order-badge">{cartItemCount} items</div>
-            <button className="icon-button" onClick={clearCart}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="3 6 5 6 21 6"></polyline>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-              </svg>
-            </button>
-          </div>
+        {isMenuRoute && (
+            <div className="order-panel">
+              <div className="order-header">
+                <h2>Current Order</h2>
+                <div className="order-badge">{cartItemCount} items</div>
+                <button className="icon-button" onClick={clearCart}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
+                </button>
+              </div>
 
-          <div className="order-type-selector">
+              <div className="order-type-selector">
             <button
               type="button"
               className={`order-type-btn ${orderType === 'Dine In' ? 'active' : ''}`}
@@ -10300,9 +10685,10 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
               </svg>
               Pay
             </button>
+              </div>
+            </div>
           </div>
-          </div>
-        </div>
+          )}
           </React.Fragment>
         )}
       </div>
@@ -10596,6 +10982,8 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                 <input
                   type="text"
                   id="customer-name"
+                  name="customer-name"
+                  autoComplete="name"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
                   placeholder="Enter first name and last name or initial (e.g., Lisa L or Lisa Smith)"
@@ -10610,6 +10998,8 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                   <input
                     type="text"
                     id="table-number"
+                    name="table-number"
+                    autoComplete="off"
                     value={tableNumber}
                     onChange={(e) => setTableNumber(e.target.value)}
                     placeholder="Enter table number"
