@@ -2,7 +2,7 @@
 /* App Shell Layout Variables */
 :root {
   --footer-h: 100px;    /* Default height to prevent layout shift - dynamically measured and updated */
-  --sidebar-w: 400px;   /* Left sidebar/nav width (for order panel) */
+  --sidebar-w: 570px;   /* Left sidebar/nav width (for order panel) */
   --settings-sidebar-w: 320px; /* Settings sidebar width */
 }
 
@@ -63,13 +63,14 @@ html, body, #root {
   left: 0;
   right: 0;
   bottom: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   box-sizing: border-box;
   display: flex;
   gap: 0;
-  align-items: flex-start;
+  align-items: stretch;
   padding-bottom: 0;
+  height: 100%;
+  min-height: 0;
 }
 
 /* Left Panel - Products (Menu Only) */
@@ -80,8 +81,8 @@ html, body, #root {
   background-color: #ffffff;
   overflow: hidden;
   align-self: stretch;
-  min-height: 100vh;
-  margin-right: var(--sidebar-w);
+  height: 100%;
+  min-height: 0;
 }
 
 /* Transactions, Checks, and Settings Views - Match Menu Color Scheme */
@@ -135,17 +136,18 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 1.5rem;
+  padding: 1.25rem 1.875rem;
+  padding-bottom: calc(1.25rem + 1px);
   border-bottom: 2px solid #c0c0c0;
-  gap: 1rem;
+  gap: 1.25rem;
   background-color: #ffffff;
-  min-height: 70px;
+  min-height: 85px;
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 1.25rem;
   flex: 1;
 }
 
@@ -153,7 +155,7 @@ html, body, #root {
   background: none;
   border: none;
   cursor: pointer;
-  padding: 0.6rem;
+  padding: 0.75rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -168,17 +170,17 @@ html, body, #root {
 
 .category-buttons {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.625rem;
 }
 
 .category-btn {
-  padding: 0.6rem 1.125rem;
+  padding: 0.75rem 1.375rem;
   border: 1px solid #ccc;
   background-color: #ffffff;
   color: #222;
   border-radius: 20px;
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   font-weight: 600;
   transition: all 0.2s;
 }
@@ -197,22 +199,23 @@ html, body, #root {
 .header-center {
   display: flex;
   align-items: center;
+  transform: translateX(-50px);
 }
 
 .edit-menu-btn {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 1.125rem;
+  gap: 0.625rem;
+  padding: 0.75rem 1.375rem;
   border: 2px solid #999;
   background-color: white;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   font-weight: 600;
   color: #222;
   transition: all 0.2s;
-  margin-right: 1rem;
+  margin-right: 1.25rem;
 }
 
 .edit-menu-btn:hover {
@@ -230,7 +233,7 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.6rem 1.125rem;
+  padding: 0.75rem 1.375rem;
   border: 2px solid #999;
   background-color: white;
   border-radius: 6px;
@@ -250,24 +253,25 @@ html, body, #root {
 .header-right {
   display: flex;
   align-items: center;
+  transform: translateX(-10px);
 }
 
 .search-bar {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 1.125rem;
+  gap: 0.625rem;
+  padding: 0.75rem 1.375rem;
   background-color: #ffffff;
   border-radius: 20px;
   border: 2px solid #bbb;
-  min-width: 250px;
+  min-width: 280px;
 }
 
 .search-bar svg {
   color: #555;
   flex-shrink: 0;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
 }
 
 .search-bar input {
@@ -275,7 +279,7 @@ html, body, #root {
   background: none;
   outline: none;
   flex: 1;
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   font-weight: 500;
   color: #111;
 }
@@ -744,33 +748,14 @@ html, body, #root {
   flex-direction: column;
   border-left: 2px solid #c0c0c0;
   overflow: hidden;
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  height: 100vh;
-  height: 100dvh;
-  z-index: 1001;
+  align-self: stretch;
+  height: calc(100% + 4px);
+  min-height: 0;
   box-sizing: border-box;
-  padding-bottom: var(--footer-h);
-}
-
-.order-header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.875rem calc(1.125rem + 1px);
-  border-bottom: 2px solid #c0c0c0;
-  min-height: 75px;
   flex-shrink: 0;
-}
-
-.order-header h2 {
-  font-size: 1.35rem;
-  font-weight: 700;
-  color: #111;
-  margin: 0;
-  flex: 1;
+  position: relative;
+  z-index: 100;
+  margin-bottom: -4px;
 }
 
 .order-badge {
@@ -785,10 +770,17 @@ html, body, #root {
 
 .order-type-selector {
   display: flex;
-  gap: 0.5rem;
-  padding: 1.125rem 1.75rem;
+  align-items: center;
+  padding: 1.25rem calc(1.5rem + 1px) calc(1.25rem + 3px) calc(1.5rem + 1px);
   border-bottom: 2px solid #c0c0c0;
+  min-height: 90px;
   flex-shrink: 0;
+}
+
+.order-type-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex: 1;
 }
 
 .order-type-btn {
@@ -802,7 +794,7 @@ html, body, #root {
   background-color: white;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 600;
   color: #222;
   transition: all 0.2s;
@@ -846,7 +838,7 @@ html, body, #root {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 1.125rem 1.75rem;
+  padding: 1.125rem 2.25rem;
   display: flex;
   flex-direction: column;
 }
@@ -855,7 +847,7 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.125rem 0;
+  padding: 1.25rem 0;
   border-bottom: 2px solid #ddd;
 }
 
@@ -889,7 +881,7 @@ html, body, #root {
 }
 
 .cart-item-price {
-  font-size: 1.05rem;
+  font-size: 1.1rem;
   font-weight: 700;
   color: #111;
   margin: 0;
@@ -924,13 +916,13 @@ html, body, #root {
 }
 
 .cart-item-controls button {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border: 2px solid #999;
   background-color: white;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   font-weight: 700;
   color: #222;
   display: flex;
@@ -946,19 +938,19 @@ html, body, #root {
 }
 
 .quantity-controls span {
-  min-width: 28px;
+  min-width: 32px;
   text-align: center;
   font-weight: 700;
   color: #111;
-  font-size: 1.05rem;
+  font-size: 1.1rem;
 }
 
 .ai-insights-btn {
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 1rem 1.5rem;
-  margin: 1rem 1.5rem;
+  padding: 1rem 2rem;
+  margin: 1rem 2.25rem;
   background-color: #e3f2fd;
   border: none;
   border-radius: 10px;
@@ -1011,7 +1003,7 @@ html, body, #root {
 }
 
 .order-summary {
-  padding: 1.75rem;
+  padding: 1.75rem 2.25rem;
   border-top: 2px solid #c0c0c0;
   flex-shrink: 0;
   margin-top: 0;
@@ -1032,7 +1024,7 @@ html, body, #root {
 }
 
 .summary-row.total {
-  font-size: 1.2rem;
+  font-size: 1.3rem;
   font-weight: 700;
   color: #000;
   margin-top: 0.5rem;
@@ -1043,7 +1035,7 @@ html, body, #root {
 .payment-buttons {
   display: flex;
   gap: 0.875rem;
-  padding: 1.125rem;
+  padding: 1.125rem 2.25rem;
   padding-bottom: 1.125rem;
   flex-shrink: 0;
   margin-top: 0;
@@ -1060,11 +1052,11 @@ html, body, #root {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 1.125rem;
+  padding: 1.25rem;
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   font-weight: 600;
   transition: all 0.2s;
 }
@@ -3241,41 +3233,41 @@ html, body, #root {
 
 @media (max-width: 1600px) {
   .order-panel {
-    width: 380px !important;
+    width: 460px !important;
   }
   
   .products-panel {
-    margin-right: 380px !important;
+    margin-right: 460px !important;
   }
 }
 
 @media (max-width: 1400px) {
   .order-panel {
-    width: 360px !important;
+    width: 530px !important;
   }
   
   .products-panel {
-    margin-right: 360px !important;
+    margin-right: 530px !important;
   }
 }
 
 @media (max-width: 1200px) {
   .order-panel {
-    width: 340px !important;
+    width: 510px !important;
   }
   
   .products-panel {
-    margin-right: 340px !important;
+    margin-right: 510px !important;
   }
 }
 
 @media (max-width: 992px) {
   .order-panel {
-    width: 320px !important;
+    width: 490px !important;
   }
   
   .products-panel {
-    margin-right: 320px !important;
+    margin-right: 490px !important;
   }
 }
 
@@ -4272,12 +4264,8 @@ html, body, #root {
   
   .account-info-columns {
     gap: 0.75rem !important;
-  }
-}
-
-@media (max-width: 768px) {
-  .owner-section .settings-lock-icon svg,
-  .manager-section .settings-lock-icon svg,
+    /* End of account-info-columns block */
+  /* End of media query */
   .location-section .settings-lock-icon svg {
     width: 16px !important;
     height: 16px !important;

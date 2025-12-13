@@ -8758,8 +8758,7 @@ function App() {
                   )}
                   
                   {activeSettingsSection === 'Payroll' && (
-                  <div className="settings-form" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                    <h2 style={{ marginBottom: '2rem', fontSize: '1.5rem', fontWeight: '600', color: '#1e3a5f' }}>Payroll Management</h2>
+                  <div className="settings-form" style={{ height: '100%', display: 'flex', flexDirection: 'column', maxWidth: '1600px', width: '100%', padding: '0 2rem' }}>
                     
                     {teamMembers.length === 0 ? (
                       <div style={{ 
@@ -8769,21 +8768,21 @@ function App() {
                         border: '1px solid #e0e0e0',
                         textAlign: 'center'
                       }}>
-                        <p style={{ fontStyle: 'italic', color: '#666' }}>No team members added yet. Add team members in the "Team members" section to manage payroll.</p>
+                        <p style={{ fontStyle: 'italic', color: '#666', fontSize: '1rem' }}>No team members added yet. Add team members in the "Team members" section to manage payroll.</p>
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
                         {/* Payroll Table Header */}
                         <div style={{ 
                           display: 'grid', 
                           gridTemplateColumns: '1.5fr 1fr 1fr 1.5fr 1.5fr', 
-                          gap: '1rem',
-                          padding: '1rem 1.5rem',
+                          gap: '1.5rem',
+                          padding: '1.5rem 2rem',
                           backgroundColor: '#1e3a5f',
                           borderRadius: '8px 8px 0 0',
                           color: 'white',
                           fontWeight: '600',
-                          fontSize: '0.9rem'
+                          fontSize: '1.2rem'
                         }}>
                           <div>Employee Name</div>
                           <div>Hourly Wage</div>
@@ -8799,8 +8798,8 @@ function App() {
                             style={{
                               display: 'grid',
                               gridTemplateColumns: '1.5fr 1fr 1fr 1.5fr 1.5fr',
-                              gap: '1rem',
-                              padding: '1rem 1.5rem',
+                              gap: '1.5rem',
+                              padding: '1.5rem 2rem',
                               backgroundColor: index % 2 === 0 ? '#ffffff' : '#f9f9f9',
                               border: '1px solid #e0e0e0',
                               borderTop: index === 0 ? 'none' : '1px solid #e0e0e0',
@@ -8808,17 +8807,17 @@ function App() {
                             }}
                           >
                             {/* Employee Name */}
-                            <div style={{ fontWeight: '600', color: '#1e3a5f' }}>
+                            <div style={{ fontWeight: '700', color: '#1e3a5f', fontSize: '1.35rem' }}>
                               {employee.name}
                             </div>
                             
                             {/* Hourly Wage */}
-                            <div style={{ color: '#333' }}>
+                            <div style={{ fontWeight: '700', color: '#333', fontSize: '1.35rem' }}>
                               {employee.hourlyPay ? `$${parseFloat(employee.hourlyPay).toFixed(2)}/hr` : 'Not set'}
                             </div>
                             
                             {/* Total Hours Worked */}
-                            <div style={{ color: '#333' }}>
+                            <div style={{ fontWeight: '700', color: '#333', fontSize: '1.35rem' }}>
                               {formatHoursMinutes(calculateTotalMinutesWorked(employee.id))}
                             </div>
                             
@@ -8840,10 +8839,10 @@ function App() {
                                 placeholder="Account Number"
                                 style={{
                                   width: '100%',
-                                  padding: '0.5rem 0.75rem',
+                                  padding: '0.875rem 1.125rem',
                                   border: '1px solid #ddd',
                                   borderRadius: '6px',
-                                  fontSize: '0.9rem'
+                                  fontSize: '1.1rem'
                                 }}
                               />
                             </div>
@@ -8867,10 +8866,10 @@ function App() {
                                 maxLength={9}
                                 style={{
                                   width: '100%',
-                                  padding: '0.5rem 0.75rem',
+                                  padding: '0.875rem 1.125rem',
                                   border: '1px solid #ddd',
                                   borderRadius: '6px',
-                                  fontSize: '0.9rem'
+                                  fontSize: '1.1rem'
                                 }}
                               />
                             </div>
@@ -8880,26 +8879,26 @@ function App() {
                         {/* Payroll Summary */}
                         <div style={{ 
                           marginTop: '1.5rem', 
-                          padding: '1.5rem', 
+                          padding: '2.5rem', 
                           backgroundColor: '#e8f5e9', 
                           borderRadius: '8px',
                           border: '1px solid #c8e6c9'
                         }}>
-                          <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', fontWeight: '600', color: '#2e7d32' }}>Payroll Summary</h3>
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+                          <h3 style={{ margin: '0 0 2rem 0', fontSize: '1.5rem', fontWeight: '600', color: '#2e7d32' }}>Payroll Summary</h3>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '2rem' }}>
                             <div>
-                              <div style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.25rem' }}>Total Employees</div>
-                              <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#1e3a5f' }}>{teamMembers.length}</div>
+                              <div style={{ fontSize: '1.1rem', color: '#666', marginBottom: '0.75rem' }}>Total Employees</div>
+                              <div style={{ fontSize: '1.75rem', fontWeight: '600', color: '#1e3a5f' }}>{teamMembers.length}</div>
                             </div>
                             <div>
-                              <div style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.25rem' }}>Total Hours (All Employees)</div>
-                              <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#1e3a5f' }}>
+                              <div style={{ fontSize: '1.1rem', color: '#666', marginBottom: '0.75rem' }}>Total Hours (All Employees)</div>
+                              <div style={{ fontSize: '1.75rem', fontWeight: '600', color: '#1e3a5f' }}>
                                 {formatHoursMinutes(teamMembers.reduce((sum, emp) => sum + calculateTotalMinutesWorked(emp.id), 0))}
                               </div>
                             </div>
                             <div>
-                              <div style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.25rem' }}>Estimated Total Pay</div>
-                              <div style={{ fontSize: '1.25rem', fontWeight: '600', color: '#2e7d32' }}>
+                              <div style={{ fontSize: '1.1rem', color: '#666', marginBottom: '0.75rem' }}>Estimated Total Pay</div>
+                              <div style={{ fontSize: '1.75rem', fontWeight: '600', color: '#2e7d32' }}>
                                 ${teamMembers.reduce((sum, emp) => {
                                   const hours = parseFloat(calculateTotalHoursWorked(emp.id))
                                   const rate = parseFloat(emp.hourlyPay) || 0
@@ -8911,8 +8910,8 @@ function App() {
                         </div>
                         
                         {/* Instructions */}
-                        <div style={{ marginTop: '0.75rem', padding: '0.5rem 1rem', backgroundColor: '#f5f5f5', borderRadius: '6px' }}>
-                          <p style={{ fontSize: '0.85rem', color: '#888', margin: 0 }}>
+                        <div style={{ marginTop: '0.75rem', padding: '0.75rem 1.25rem', backgroundColor: '#f5f5f5', borderRadius: '6px' }}>
+                          <p style={{ fontSize: '0.95rem', color: '#888', margin: 0 }}>
                             <strong>Note:</strong> Account and routing numbers are saved automatically. Hours are calculated from clock in/out records. Ensure employees have hourly pay rates set in Team members section.
                           </p>
                         </div>
@@ -9786,68 +9785,6 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
               </div>
             )}
           </div>
-          
-          {/* Navigation Footer */}
-          <div className="navigation-footer">
-            <div className="nav-footer-left">
-              <button 
-                className="nav-footer-btn"
-                onClick={() => setIsLogoutModalOpen(true)}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                  <polyline points="16 17 21 12 16 7"></polyline>
-                  <line x1="21" y1="12" x2="9" y2="12"></line>
-                </svg>
-                <span>Logout</span>
-              </button>
-              <button 
-                className={`nav-footer-btn ${activeView === null ? 'active' : ''}`}
-                onClick={() => goToPage(null)}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-                  <polyline points="9 22 9 12 15 12 15 22"></polyline>
-                </svg>
-                <span>Menu</span>
-              </button>
-              <button 
-                className={`nav-footer-btn ${activeView === 'Transaction' ? 'active' : ''}`}
-                onClick={() => goToPage('Transaction')}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
-                  <line x1="1" y1="10" x2="23" y2="10"></line>
-                </svg>
-                <span>Transactions</span>
-              </button>
-              <button 
-                className={`nav-footer-btn ${activeView === 'Timesheets' ? 'active' : ''}`}
-                onClick={() => goToPage('Timesheets')}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                  <polyline points="14 2 14 8 20 8"></polyline>
-                  <line x1="16" y1="13" x2="8" y2="13"></line>
-                  <line x1="16" y1="17" x2="8" y2="17"></line>
-                  <polyline points="10 9 9 9 8 9"></polyline>
-                </svg>
-                <span>Clock in/out</span>
-              </button>
-              <button 
-                className={`nav-footer-btn ${activeView === 'Settings' ? 'active' : ''}`}
-                onClick={() => goToPage('Settings')}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
-                  <circle cx="12" cy="12" r="3"></circle>
-                </svg>
-                <span>Settings</span>
-              </button>
-            </div>
-            <div className="nav-footer-right">
-            </div>
-          </div>
           </div>
 
         {/* Edit Product Modal */}
@@ -10554,44 +10491,35 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
 
         {isMenuRoute && (
             <div className="order-panel">
-              <div className="order-header">
-                <h2>Current Order</h2>
-                <div className="order-badge">{cartItemCount} items</div>
-                <button className="icon-button" onClick={clearCart}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="3 6 5 6 21 6"></polyline>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                  </svg>
-                </button>
-              </div>
-
               <div className="order-type-selector">
-            <button
-              type="button"
-              className={`order-type-btn ${orderType === 'Dine In' ? 'active' : ''}`}
-              onClick={() => setOrderType('Dine In')}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"></path>
-                <path d="M7 2v20"></path>
-                <path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3v0"></path>
-                <path d="M21 15v7"></path>
-              </svg>
-              Dine In
-            </button>
-            <button
-              type="button"
-              className={`order-type-btn ${orderType === 'Takeout' ? 'active' : ''}`}
-              onClick={() => setOrderType('Takeout')}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
-                <line x1="3" y1="6" x2="21" y2="6"></line>
-                <path d="M16 10a4 4 0 0 1-8 0"></path>
-              </svg>
-              Takeout
-            </button>
-          </div>
+                <div className="order-type-buttons">
+                  <button
+                    type="button"
+                    className={`order-type-btn ${orderType === 'Dine In' ? 'active' : ''}`}
+                    onClick={() => setOrderType('Dine In')}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"></path>
+                      <path d="M7 2v20"></path>
+                      <path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3v0"></path>
+                      <path d="M21 15v7"></path>
+                    </svg>
+                    Dine In
+                  </button>
+                  <button
+                    type="button"
+                    className={`order-type-btn ${orderType === 'Takeout' ? 'active' : ''}`}
+                    onClick={() => setOrderType('Takeout')}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
+                      <line x1="3" y1="6" x2="21" y2="6"></line>
+                      <path d="M16 10a4 4 0 0 1-8 0"></path>
+                    </svg>
+                    Takeout
+                  </button>
+                </div>
+              </div>
 
           {cart.length === 0 ? (
             <div className="empty-cart">
@@ -11995,10 +11923,73 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
         </div>
       )}
 
+      {/* Navigation Footer - Rendered outside main-content for Menu route to fix fixed positioning */}
+      {isMenuRoute && (
+        <div className="navigation-footer">
+          <div className="nav-footer-left">
+            <button 
+              className="nav-footer-btn"
+              onClick={() => setIsLogoutModalOpen(true)}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+              <span>Logout</span>
+            </button>
+            <button 
+              className={`nav-footer-btn ${activeView === null ? 'active' : ''}`}
+              onClick={() => goToPage(null)}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                <polyline points="9 22 9 12 15 12 15 22"></polyline>
+              </svg>
+              <span>Menu</span>
+            </button>
+            <button 
+              className={`nav-footer-btn ${activeView === 'Transaction' ? 'active' : ''}`}
+              onClick={() => goToPage('Transaction')}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
+                <line x1="1" y1="10" x2="23" y2="10"></line>
+              </svg>
+              <span>Transactions</span>
+            </button>
+            <button 
+              className={`nav-footer-btn ${activeView === 'Timesheets' ? 'active' : ''}`}
+              onClick={() => goToPage('Timesheets')}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+              <span>Clock in/out</span>
+            </button>
+            <button 
+              className={`nav-footer-btn ${activeView === 'Settings' ? 'active' : ''}`}
+              onClick={() => goToPage('Settings')}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+              <span>Settings</span>
+            </button>
+          </div>
+          <div className="nav-footer-right">
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
 
 // Export the App component
 export default App
-
