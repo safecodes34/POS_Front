@@ -105,20 +105,49 @@ if (typeof window !== 'undefined') {
   
   // Warn if using wrong backend URL
   if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    if (BACKEND_BASE_URL.includes('localhost')) {
+    const hostname = window.location.hostname
+    const isVercel = hostname.includes('vercel.app')
+    const isRailway = hostname.includes('railway.app')
+    const isLocalNetworkIP = 
+      /^192\.168\.\d+\.\d+$/.test(hostname) ||
+      /^10\.\d+\.\d+\.\d+$/.test(hostname) ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/.test(hostname)
+    
+    // Vercel frontend should use Railway backend - this is correct, don't warn
+    if (isVercel && BACKEND_BASE_URL.includes('railway.app')) {
+      console.log('✅ Vercel deployment detected - using Railway backend (correct configuration)')
+    }
+    // Railway frontend should use Railway backend - this is correct, don't warn
+    else if (isRailway && BACKEND_BASE_URL.includes('railway.app')) {
+      console.log('✅ Railway deployment detected - using Railway backend (correct configuration)')
+    }
+    // Local network IP trying to use localhost backend - this won't work
+    else if (isLocalNetworkIP && BACKEND_BASE_URL.includes('localhost')) {
       console.error('⚠️ WARNING: Frontend accessed via network IP but backend URL is localhost!')
       console.error('   This will not work from another device.')
-      console.error('   Frontend hostname:', window.location.hostname)
+      console.error('   Frontend hostname:', hostname)
       console.error('   Backend URL:', BACKEND_BASE_URL)
-      console.error('   Expected backend URL:', `https://${window.location.hostname}:4001`)
-    } else if (BACKEND_BASE_URL.includes('railway.app') || BACKEND_BASE_URL.includes('vercel.app')) {
+      console.error('   Expected backend URL:', `https://${hostname}:4001`)
+    }
+    // Local network IP trying to use production backend - this won't work
+    else if (isLocalNetworkIP && (BACKEND_BASE_URL.includes('railway.app') || BACKEND_BASE_URL.includes('vercel.app'))) {
       console.error('⚠️ WARNING: Frontend accessed via network IP but backend URL is production!')
       console.error('   This will not work - production backend blocks local network origins.')
-      console.error('   Frontend hostname:', window.location.hostname)
+      console.error('   Frontend hostname:', hostname)
       console.error('   Backend URL:', BACKEND_BASE_URL)
-      console.error('   Expected backend URL:', `https://${window.location.hostname}:4001`)
+      console.error('   Expected backend URL:', `https://${hostname}:4001`)
       console.error('   Fix: Restart frontend to clear production mode detection')
-    } else {
+    }
+    // Vercel/Railway trying to use localhost backend - misconfiguration
+    else if ((isVercel || isRailway) && BACKEND_BASE_URL.includes('localhost')) {
+      console.error('⚠️ WARNING: Production frontend trying to use localhost backend!')
+      console.error('   This will not work in production.')
+      console.error('   Frontend hostname:', hostname)
+      console.error('   Backend URL:', BACKEND_BASE_URL)
+      console.error('   Expected backend URL: Railway or production backend URL')
+    }
+    // Network access with matching hostname - correct
+    else {
       console.log('✅ Network access detected - backend URL matches frontend hostname')
     }
   }
@@ -508,12 +537,24 @@ function App() {
   const [newToppingPrice, setNewToppingPrice] = useState('')
   const [ingredientsText, setIngredientsText] = useState('')
   const [isEditMode, setIsEditMode] = useState(false)
-  const [categories, setCategories] = useState(() => 
-    loadFromStorage(STORAGE_KEYS.CATEGORIES, initialCategories)
-  )
+  const [categories, setCategories] = useState(() => {
+    const loaded = loadFromStorage(STORAGE_KEYS.CATEGORIES, initialCategories)
+    // Ensure "All" is always first
+    if (Array.isArray(loaded)) {
+      const otherCategories = loaded.filter(c => c !== 'All')
+      return ['All', ...otherCategories]
+    }
+    return initialCategories
+  })
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false)
   const [editingCategoryIndex, setEditingCategoryIndex] = useState(null)
   const [newCategoryName, setNewCategoryName] = useState('')
+  const categoryButtonsRef = useRef(null)
+  const [isCategoryScrolling, setIsCategoryScrolling] = useState(false)
+  const categoryDragStartX = useRef(0)
+  const categoryScrollStartX = useRef(0)
+  const categoryButtonClickRef = useRef(null)
+  const categoryIsDraggingRef = useRef(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [activeEditSection, setActiveEditSection] = useState('details')
   const [draggedIndex, setDraggedIndex] = useState(null)
@@ -668,6 +709,8 @@ function App() {
   const [lastPaymentIntentId, setLastPaymentIntentId] = useState(null)
   const [isAutoImportModalOpen, setIsAutoImportModalOpen] = useState(false)
   const [importFile, setImportFile] = useState(null)
+  const [importUrl, setImportUrl] = useState('')
+  const [importType, setImportType] = useState('file') // 'file' or 'url'
   const [isImporting, setIsImporting] = useState(false)
   const [importError, setImportError] = useState(null)
   const [importProgress, setImportProgress] = useState(null)
@@ -1107,6 +1150,18 @@ function App() {
     loadProducts()
   }, [currentUser])
 
+  // Ensure products are loaded when navigating to Menu if they're empty
+  useEffect(() => {
+    const isMenuRoute = location.pathname === "/Menu" || location.pathname === "/menu" || location.pathname === "/" || activeView === null
+    if (isMenuRoute && currentUser && currentUser.email && products.length === 0) {
+      console.log('🔄 Menu route detected with empty products, reloading...')
+      reloadProductsFromBackend()
+    }
+    // Note: reloadProductsFromBackend is intentionally not in dependencies to avoid infinite loops
+    // The products.length === 0 condition prevents unnecessary reloads
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, activeView, currentUser, products.length])
+
   // Save cart to localStorage whenever it changes
   // Load transactions when Transaction view is opened
   useEffect(() => {
@@ -1187,21 +1242,31 @@ function App() {
     // Check new route format first
     if (routeToPage[pathname] !== undefined) {
       const page = routeToPage[pathname]
-      if (activeView !== page) {
-        setActiveView(page)
-      }
+      setActiveView(prevView => {
+        // Only update if different to avoid unnecessary re-renders
+        if (prevView !== page) {
+          return page
+        }
+        return prevView
+      })
     } else {
       // Fallback: check old route format
       const path = pathname.split('/').filter(Boolean)[0]
       if (path && ['Transaction', 'Timesheets', 'Settings'].includes(path)) {
-        if (activeView !== path) {
-          setActiveView(path)
-        }
-      } else if (pathname === '/' || pathname === '' || pathname === '/menu') {
-        // Root path or old menu path should redirect to /Menu (handled above) and set activeView to null
-        if (activeView !== null) {
-          setActiveView(null)
-        }
+        setActiveView(prevView => {
+          if (prevView !== path) {
+            return path
+          }
+          return prevView
+        })
+      } else if (pathname === '/' || pathname === '' || pathname === '/menu' || pathname === '/Menu') {
+        // Root path or menu path should set activeView to null
+        setActiveView(prevView => {
+          if (prevView !== null) {
+            return null
+          }
+          return prevView
+        })
       }
     }
   }, [location.pathname])
@@ -1295,6 +1360,7 @@ function App() {
       const params = new URLSearchParams(location.search)
       const currentCategory = params.get('category')
       if (currentCategory !== selectedCategory) {
+        console.log('🟡 Updating URL with category:', selectedCategory);
         if (selectedCategory && selectedCategory !== 'All') {
           navigate(`/Menu?category=${encodeURIComponent(selectedCategory)}`, { replace: true })
         } else {
@@ -1303,7 +1369,7 @@ function App() {
         }
       }
     }
-  }, [selectedCategory, activeView, location.search, navigate])
+  }, [selectedCategory, activeView, navigate]) // Removed location.search to avoid circular updates
 
   // Navigation function that updates both state and URL
   const goToPage = useCallback((page) => {
@@ -1405,15 +1471,17 @@ function App() {
     }
   }, [activeView, activeSettingsSection])
 
-  // Restore category from URL when on menu
+  // Restore category from URL when on menu (only on initial load, not on every URL change)
   useEffect(() => {
     if (!activeView) {
       const categoryFromURL = getCategoryFromURL()
-      if (categoryFromURL) {
+      // Only set from URL if it's different from current selection (to avoid overriding user clicks)
+      if (categoryFromURL && categoryFromURL !== selectedCategory) {
+        console.log('🟢 Restoring category from URL:', categoryFromURL);
         setSelectedCategory(categoryFromURL)
       }
     }
-  }, [location.search, activeView])
+  }, [location.search, activeView]) // Note: This will run when URL changes, but we check if different
 
   useEffect(() => {
     try {
@@ -2248,36 +2316,118 @@ function App() {
 
   // Process menu import with AI
   const handleMenuImport = async () => {
-    if (!importFile) {
+    if (importType === 'file' && !importFile) {
       setImportError('Please select a file first')
       return
+    }
+    
+    if (importType === 'url' && !importUrl.trim()) {
+      setImportError('Please enter a menu URL')
+      return
+    }
+
+    // Validate URL format if URL import
+    if (importType === 'url') {
+      try {
+        new URL(importUrl.trim())
+      } catch (e) {
+        setImportError('Please enter a valid URL (e.g., https://example.com/menu)')
+        return
+      }
     }
 
     setIsImporting(true)
     setImportError(null)
-    setImportProgress('Uploading file...')
+    setImportProgress(importType === 'file' ? 'Uploading file...' : 'Fetching menu from URL...')
 
     try {
-      const formData = new FormData()
-      formData.append('menu', importFile)
+      let uploadResponse
+      
+      if (importType === 'file') {
+        const formData = new FormData()
+        formData.append('menu', importFile)
 
-      // Upload file to backend
-      const uploadResponse = await axios.post(`${API_BASE_URL}/menu/analyze`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        },
-        onUploadProgress: (progressEvent) => {
-          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-          setImportProgress(`Uploading: ${percentCompleted}%`)
+        // Upload file to backend
+        uploadResponse = await axios.post(`${API_BASE_URL}/menu/analyze`, formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          },
+          onUploadProgress: (progressEvent) => {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+            setImportProgress(`Uploading: ${percentCompleted}%`)
+          }
+        })
+      } else {
+        // Import from URL - use new import-url endpoint that does everything server-side
+        const requestUrl = `${API_BASE_URL}/menu/import-url`
+        console.log('📤 Sending menu URL import request to:', requestUrl)
+        console.log('📤 API_BASE_URL:', API_BASE_URL)
+        console.log('📤 URL to import:', importUrl.trim())
+        console.log('📤 User email:', currentUser?.email)
+        
+        setImportProgress('Analyzing menu and creating products...')
+        
+        // Call import-url endpoint which handles analysis, product creation, and image downloads
+        const importResponse = await axios.post(requestUrl, {
+          url: importUrl.trim(),
+          userEmail: currentUser?.email || ''
+        }, {
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          timeout: 120000 // 2 minute timeout for URL imports
+        })
+        
+        console.log('✅ Menu import complete:', importResponse.data)
+        
+        const result = importResponse.data
+        
+        // Show warnings if any
+        if (result.warnings && result.warnings.length > 0) {
+          console.warn('⚠️ Import warnings:', result.warnings)
         }
-      })
+        
+        // Reload products from backend to show newly created products
+        setImportProgress('Reloading products...')
+        await reloadProductsFromBackend()
+        
+        // Update categories if new ones were created
+        if (result.categories && result.categories.length > 0) {
+          setCategories(prev => {
+            const existing = new Set(prev)
+            const newCats = result.categories.filter(c => c !== 'All' && !existing.has(c))
+            if (newCats.length > 0) {
+              return [...prev.filter(c => c !== 'All'), ...newCats, 'All']
+            }
+            return prev
+          })
+        }
+        
+        // Show success message
+        const message = result.createdCount > 0
+          ? `Successfully imported ${result.createdCount} products${result.skippedCount > 0 ? ` (${result.skippedCount} skipped)` : ''} from ${result.categories?.length || 0} categories`
+          : 'No products were imported'
+        setImportProgress(message)
+        
+        setTimeout(() => {
+          setIsAutoImportModalOpen(false)
+          setImportFile(null)
+          setImportUrl('')
+          setImportProgress(null)
+          setIsImporting(false)
+        }, 2000)
+        
+        // Return early since URL import is complete
+        return
+      }
 
       setImportProgress('Analyzing menu with AI...')
 
+      // For file uploads, continue with existing polling logic
       // Wait for analysis to complete (polling)
       let analysisComplete = false
       let attempts = 0
-      const maxAttempts = 60 // 60 seconds timeout
+      const maxAttempts = 90 // 90 seconds timeout (URLs may take longer)
 
       while (!analysisComplete && attempts < maxAttempts) {
         await new Promise(resolve => setTimeout(resolve, 1000))
@@ -2293,10 +2443,14 @@ function App() {
             // Process the analyzed menu data
             await processMenuData(menuData)
             
+            // Final reload to ensure all products are visible
+            await reloadProductsFromBackend()
+            
             setImportProgress('Import complete!')
             setTimeout(() => {
               setIsAutoImportModalOpen(false)
               setImportFile(null)
+              setImportUrl('')
               setImportProgress(null)
               setIsImporting(false)
             }, 1500)
@@ -2326,53 +2480,144 @@ function App() {
     }
   }
 
+  // Helper function to download image from URL and convert to File
+  const downloadImageFromUrl = async (imageUrl) => {
+    try {
+      setImportProgress(`Downloading image: ${imageUrl.substring(0, 50)}...`)
+      
+      const response = await fetch(imageUrl, {
+        mode: 'cors',
+        headers: {
+          'Accept': 'image/*'
+        }
+      })
+      
+      if (!response.ok) {
+        console.warn(`Failed to download image: ${imageUrl}`, response.status)
+        return null
+      }
+      
+      const blob = await response.blob()
+      const fileName = imageUrl.split('/').pop().split('?')[0] || 'menu-item.jpg'
+      const file = new File([blob], fileName, { type: blob.type || 'image/jpeg' })
+      
+      return file
+    } catch (error) {
+      console.warn(`Error downloading image ${imageUrl}:`, error)
+      return null
+    }
+  }
+
+  // Helper function to upload image to backend via PUT endpoint
+  const uploadImageToBackend = async (imageFile, productId, productData) => {
+    try {
+      const formData = new FormData()
+      formData.append('image', imageFile)
+      formData.append('userEmail', currentUser?.email || '')
+      formData.append('name', productData.name)
+      formData.append('price', productData.price.toString())
+      if (productData.category) formData.append('category', productData.category)
+      if (productData.description) formData.append('description', productData.description)
+      if (productData.toppings) formData.append('toppings', JSON.stringify(productData.toppings))
+      if (productData.ingredients) formData.append('ingredients', JSON.stringify(productData.ingredients))
+      
+      const response = await axios.put(`${API_BASE_URL}/products/${productId}`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+      
+      return response.data.image || response.data.imageUrl
+    } catch (error) {
+      console.warn(`Error uploading image for product ${productId}:`, error)
+      return null
+    }
+  }
+
   // Process and create products from analyzed menu data
   const processMenuData = async (menuData) => {
+    console.log('📋 Processing menu data:', menuData)
+    console.log('📋 Menu data sections:', menuData?.sections)
+    console.log('📋 Menu data categories:', menuData?.categories)
+    
+    if (!menuData || (!menuData.sections && !menuData.categories)) {
+      console.error('❌ Invalid menu data received:', menuData)
+      setImportError('Invalid menu data received from server. Please try again.')
+      return
+    }
+    
     setImportProgress('Creating menu sections and products...')
 
     // Create categories/sections if they don't exist
     const existingCategories = new Set(categories)
     const newCategories = []
 
-    if (menuData.sections) {
-      for (const section of menuData.sections) {
+    // Handle both sections and categories format
+    const sections = menuData?.sections || (menuData?.categories ? menuData.categories.map(cat => ({
+      name: cat.name,
+      items: cat.items || []
+    })) : [])
+
+    if (sections && sections.length > 0) {
+      for (const section of sections) {
         if (section.name && !existingCategories.has(section.name) && section.name !== 'All') {
           newCategories.push(section.name)
           existingCategories.add(section.name)
         }
       }
+    } else {
+      console.warn('⚠️ No sections found in menu data')
+      setImportError('No menu sections found in the analyzed data. Please check the menu source.')
+      return
     }
 
     if (newCategories.length > 0) {
-      setCategories(prev => [...prev.filter(c => c !== 'All'), ...newCategories, 'All'])
+      console.log(`📁 Adding ${newCategories.length} new categories:`, newCategories)
+      setCategories(prev => {
+        const updated = ['All', ...prev.filter(c => c !== 'All'), ...newCategories]
+        console.log('📁 Updated categories:', updated)
+        return updated
+      })
+    } else {
+      console.log('📁 No new categories to add')
     }
 
-    // Create products
+    // Create products (backend will assign IDs)
     const newProducts = []
-    let productIdCounter = Date.now()
 
-    if (menuData.sections) {
-      for (const section of menuData.sections) {
+    if (sections && sections.length > 0) {
+      for (const section of sections) {
         if (section.items) {
           for (const item of section.items) {
-            const productId = `product-${productIdCounter++}`
+            // Handle price format (can be number, string, or object with amount/currency)
+            let itemPrice = 0;
+            if (item.price !== null && item.price !== undefined) {
+              if (typeof item.price === 'object' && item.price.amount !== undefined) {
+                itemPrice = parseFloat(item.price.amount) || 0;
+              } else if (typeof item.price === 'number') {
+                itemPrice = item.price;
+              } else if (typeof item.price === 'string') {
+                itemPrice = parseFloat(item.price.replace(/[^0-9.]/g, '')) || 0;
+              }
+            }
             
             const newProduct = {
-              id: productId,
               name: item.name || 'Unnamed Item',
-              price: parseFloat(item.price) || 0,
+              price: itemPrice,
               category: section.name || 'All',
               image: null,
+              description: item.description || '',
               toppings: item.toppings ? item.toppings.map(t => ({
-                name: t.name || t,
-                price: t.price || 0,
+                name: typeof t === 'string' ? t : (t.name || t),
+                price: typeof t === 'object' && t.price ? (typeof t.price === 'object' ? parseFloat(t.price.amount) || 0 : parseFloat(t.price) || 0) : 0,
                 halfSameAsBase: false,
                 preSelected: false,
                 hasPortions: true,
                 hasHalf: true,
                 hasDouble: true
               })) : [],
-              ingredients: item.ingredients || []
+              ingredients: item.ingredients || [],
+              imageUrl: item.imageUrl || item.image_url || null // Store original image URL for later processing
             }
 
             newProducts.push(newProduct)
@@ -2381,21 +2626,100 @@ function App() {
       }
     }
 
-    // Add new products to existing products
+    // Process images for products that have imageUrl
     if (newProducts.length > 0) {
-      setProducts(prev => [...prev, ...newProducts])
+      setImportProgress(`Creating ${newProducts.length} products...`)
       
-      // Save to backend
+      // Create products in backend and get their IDs
+      const createdProducts = []
       try {
         for (const product of newProducts) {
-          await axios.post(`${API_BASE_URL}/products`, product)
+          const formData = new FormData()
+          formData.append('name', product.name)
+          formData.append('price', product.price.toString())
+          formData.append('category', product.category || 'All')
+          formData.append('description', product.description || '')
+          formData.append('userEmail', currentUser?.email || '')
+          
+          // Always append toppings and ingredients, even if empty arrays
+          formData.append('toppings', JSON.stringify(product.toppings || []))
+          formData.append('ingredients', JSON.stringify(product.ingredients || []))
+          
+          console.log(`📦 Creating product: ${product.name} (${product.category}) - Price: $${product.price}, Toppings: ${product.toppings?.length || 0}, Ingredients: ${product.ingredients?.length || 0}`)
+          
+          const response = await axios.post(`${API_BASE_URL}/products`, formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data'
+            }
+          })
+          
+          createdProducts.push({
+            ...response.data,
+            imageUrl: product.imageUrl // Preserve original image URL
+          })
+        }
+        
+        // Reload products from backend to ensure consistency
+        console.log(`✅ Created ${createdProducts.length} products, reloading from backend...`)
+        try {
+          const reloaded = await reloadProductsFromBackend()
+          if (reloaded) {
+            console.log(`✅ Successfully reloaded ${products.length} products from backend`)
+          }
+        } catch (reloadError) {
+          console.error('⚠️ Error reloading products:', reloadError)
+          // Don't fail the import if reload fails - products are already created
         }
       } catch (error) {
         console.error('Error saving products to backend:', error)
+        setImportError('Failed to save some products. Please try again.')
+        return
       }
-    }
 
-    setImportProgress(`Successfully imported ${newProducts.length} products from ${menuData.sections?.length || 0} sections`)
+      // Then download and upload images for products that have imageUrl
+      const productsWithImages = createdProducts.filter(p => p.imageUrl)
+      if (productsWithImages.length > 0) {
+        setImportProgress(`Processing images for ${productsWithImages.length} products...`)
+        let imageCount = 0
+        
+        for (let i = 0; i < productsWithImages.length; i++) {
+          const product = productsWithImages[i]
+          try {
+            setImportProgress(`Downloading image ${i + 1}/${productsWithImages.length}...`)
+            
+            const imageFile = await downloadImageFromUrl(product.imageUrl)
+            if (imageFile) {
+              const imageUrl = await uploadImageToBackend(imageFile, product.id, product)
+              
+              if (imageUrl) {
+                // Update product with image URL
+                product.image = imageUrl
+                imageCount++
+                
+                // Update in local state
+                setProducts(prev => prev.map(p => 
+                  p.id === product.id ? { ...p, image: imageUrl } : p
+                ))
+              }
+            }
+          } catch (error) {
+            console.warn(`Error processing image for product ${product.name}:`, error)
+          }
+        }
+        
+        if (imageCount > 0) {
+          setImportProgress(`Successfully imported ${createdProducts.length} products with ${imageCount} images from ${menuData.sections?.length || 0} sections`)
+        } else {
+          setImportProgress(`Successfully imported ${createdProducts.length} products from ${menuData.sections?.length || 0} sections`)
+        }
+      } else {
+        setImportProgress(`Successfully imported ${createdProducts.length} products from ${menuData.sections?.length || 0} sections`)
+      }
+    } else {
+      console.warn('⚠️ No products to create')
+      setImportProgress('No products found to import')
+      setImportError('No products found in the menu data. Please check the menu source.')
+    }
   }
 
   // Helper function to get week dates from a Monday start date
@@ -3168,8 +3492,11 @@ function App() {
       })
       console.log('✅ Categories loaded:', response.data?.length || 0, 'categories for user:', currentUser.email)
       if (response.data && Array.isArray(response.data)) {
-        setCategories(response.data)
-        localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(response.data))
+        // Ensure "All" is always first
+        const categoriesList = response.data.filter(c => c !== 'All')
+        const orderedCategories = ['All', ...categoriesList]
+        setCategories(orderedCategories)
+        localStorage.setItem(STORAGE_KEYS.CATEGORIES, JSON.stringify(orderedCategories))
         return true
       }
       return false
@@ -4894,7 +5221,9 @@ function App() {
 
   const handleAddCategory = async () => {
     if (newCategoryName.trim() && !categories.includes(newCategoryName.trim())) {
-      const newCategories = [...categories, newCategoryName.trim()]
+      // Ensure "All" stays first
+      const otherCategories = categories.filter(c => c !== 'All')
+      const newCategories = ['All', ...otherCategories, newCategoryName.trim()]
       setCategories(newCategories)
       setNewCategoryName('')
       // Save to backend
@@ -4914,6 +5243,10 @@ function App() {
       const oldCategory = updatedCategories[editingCategoryIndex]
       updatedCategories[editingCategoryIndex] = newCategoryName.trim()
       
+      // Ensure "All" stays first
+      const otherCategories = updatedCategories.filter(c => c !== 'All')
+      const orderedCategories = ['All', ...otherCategories]
+      
       // Update products with the old category to use the new category name
       const updatedProducts = products.map(p => 
         p.category === oldCategory ? { ...p, category: newCategoryName.trim() } : p
@@ -4925,7 +5258,7 @@ function App() {
         setSelectedCategory(newCategoryName.trim())
       }
       
-      setCategories(updatedCategories)
+      setCategories(orderedCategories)
       setEditingCategoryIndex(null)
       setNewCategoryName('')
       
@@ -4952,6 +5285,9 @@ function App() {
     if (index === 0) return // Can't delete "All"
     const categoryToDelete = categories[index]
     const updatedCategories = categories.filter((_, i) => i !== index)
+    // Ensure "All" stays first (should already be first, but just in case)
+    const otherCategories = updatedCategories.filter(c => c !== 'All')
+    const orderedCategories = ['All', ...otherCategories]
     
     // Update products in deleted category to "All" or first available category
     const updatedProducts = products.map(p => 
@@ -4964,7 +5300,7 @@ function App() {
       setSelectedCategory('All')
     }
     
-    setCategories(updatedCategories)
+    setCategories(orderedCategories)
     
     // Save categories and products to backend
     await Promise.all([
@@ -5142,6 +5478,77 @@ function App() {
     setIngredientsText(allIngredients.join('\n'))
   }
 
+  // Drag-to-scroll handlers for category buttons
+  const categoryDragThreshold = 5 // pixels of movement before considering it a drag
+
+  const handleCategoryScrollMouseDown = (e) => {
+    if (!categoryButtonsRef.current) return
+    
+    // Don't handle if clicking directly on a button (button's own handler will deal with it)
+    // Check if the click target is a button or inside a button
+    if (e.target.closest('.category-btn')) {
+      // Let the button's own handlers deal with it - don't interfere
+      return
+    }
+    
+    // Only handle drag-to-scroll on the container itself, not on buttons
+    // Store initial values for drag-to-scroll
+    categoryDragStartX.current = e.clientX
+    categoryScrollStartX.current = categoryButtonsRef.current.scrollLeft
+    categoryIsDraggingRef.current = false
+    categoryButtonClickRef.current = null
+    
+    // Set up move and up handlers
+    const handleMouseMove = (moveEvent) => {
+      const deltaX = Math.abs(moveEvent.clientX - categoryDragStartX.current)
+      
+      if (deltaX > categoryDragThreshold) {
+        // This is a drag, not a click
+        if (!categoryIsDraggingRef.current) {
+          categoryIsDraggingRef.current = true
+          setIsCategoryScrolling(true)
+          categoryButtonClickRef.current = null // Cancel the click
+          document.body.style.cursor = 'grabbing'
+          document.body.style.userSelect = 'none'
+          if (categoryButtonsRef.current) {
+            categoryButtonsRef.current.style.cursor = 'grabbing'
+          }
+        }
+        
+        // Update scroll position
+        const scrollDelta = moveEvent.clientX - categoryDragStartX.current
+        if (categoryButtonsRef.current) {
+          categoryButtonsRef.current.scrollLeft = categoryScrollStartX.current - scrollDelta
+        }
+      }
+    }
+    
+    const handleMouseUp = () => {
+      const wasDragging = categoryIsDraggingRef.current
+      
+      // Clean up dragging state
+      if (wasDragging) {
+        setIsCategoryScrolling(false)
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        categoryIsDraggingRef.current = false
+        if (categoryButtonsRef.current) {
+          categoryButtonsRef.current.style.cursor = 'grab'
+        }
+      }
+      
+      // Don't process button clicks here - buttons now have their own onClick handlers
+      // This mouseup handler is only for drag-to-scroll functionality
+      
+      categoryButtonClickRef.current = null
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+    
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }
+
   const handleMouseDown = (e, index) => {
     if (index === 0) return // Can't drag "All"
     if (editingCategoryIndex !== null) return // Can't drag while editing
@@ -5238,7 +5645,10 @@ function App() {
         const draggedCategory = newCategories[startIndex]
         newCategories.splice(startIndex, 1)
         newCategories.splice(currentIndex, 0, draggedCategory)
-        setCategories(newCategories)
+        // Ensure "All" stays first
+        const otherCategories = newCategories.filter(c => c !== 'All')
+        const orderedCategories = ['All', ...otherCategories]
+        setCategories(orderedCategories)
         // Save to backend
         saveCategoriesToBackend(newCategories)
       }
@@ -5426,6 +5836,8 @@ function App() {
               }}>
                 <input
                   type="text"
+                  id="discount-code"
+                  name="discount-code"
                   placeholder="Enter discount code"
                   value={discountCode}
                   onChange={(e) => setDiscountCode(e.target.value)}
@@ -6828,8 +7240,11 @@ function App() {
                   </p>
                   
                   <div style={{ marginBottom: '1rem' }}>
+                    <label htmlFor="employee-password-prompt" style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', fontSize: '1rem', color: '#333' }}>Password</label>
                     <input
                       type="password"
+                      id="employee-password-prompt"
+                      name="employee-password-prompt"
                       value={passwordPrompt.passwordInput}
                       onChange={(e) => setPasswordPrompt(prev => ({ ...prev, passwordInput: e.target.value, error: '' }))}
                       onKeyPress={(e) => {
@@ -6988,15 +7403,19 @@ function App() {
             </div>
           </div>
         ) : activeView === 'Settings' ? (
-          <div className="settings-view" style={{ width: '100%', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-            {/* Settings Content Wrapper - Sidebar and Main Content */}
-            <div className="settings-content-wrapper" style={{ display: 'flex', flexDirection: 'row', flex: 1, minHeight: 0 }}>
-              {/* Settings Sidebar */}
-              <div ref={settingsSidebarRef} className="settings-sidebar">
+          <div className="settings-view" style={{ width: '100%', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, position: 'relative' }}>
+            {/* Settings Sidebar - Outside wrapper to prevent blocking */}
+            <div ref={settingsSidebarRef} className="settings-sidebar">
                 <div className="settings-sidebar-content" style={{ flex: 1, overflowY: 'auto', padding: '1rem', paddingBottom: '1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   <button
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Account' ? 'active' : ''}`}
-                    onClick={() => handleSettingsSectionChange('Account')}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!(activeSettingsSection === 'Terms and Conditions' && !tosAgreed)) {
+                        handleSettingsSectionChange('Account');
+                      }
+                    }}
                     disabled={activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
                     style={activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
@@ -7008,7 +7427,13 @@ function App() {
                   </button>
                   <button
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Team members' ? 'active' : ''}`}
-                    onClick={() => handleSettingsSectionChange('Team members')}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!(activeSettingsSection === 'Terms and Conditions' && !tosAgreed)) {
+                        handleSettingsSectionChange('Team members');
+                      }
+                    }}
                     disabled={activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
                     style={activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
@@ -7022,7 +7447,13 @@ function App() {
                   </button>
                   <button
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Schedule' ? 'active' : ''}`}
-                    onClick={() => handleSettingsSectionChange('Schedule')}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!(activeSettingsSection === 'Terms and Conditions' && !tosAgreed)) {
+                        handleSettingsSectionChange('Schedule');
+                      }
+                    }}
                     disabled={activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
                     style={activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
@@ -7036,7 +7467,13 @@ function App() {
                   </button>
                   <button
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Edit time-sheets' ? 'active' : ''}`}
-                    onClick={() => handleSettingsSectionChange('Edit time-sheets')}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!(activeSettingsSection === 'Terms and Conditions' && !tosAgreed)) {
+                        handleSettingsSectionChange('Edit time-sheets');
+                      }
+                    }}
                     disabled={activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
                     style={activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
@@ -7048,7 +7485,13 @@ function App() {
                   </button>
                   <button
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Payroll' ? 'active' : ''}`}
-                    onClick={() => handleSettingsSectionChange('Payroll')}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!(activeSettingsSection === 'Terms and Conditions' && !tosAgreed)) {
+                        handleSettingsSectionChange('Payroll');
+                      }
+                    }}
                     disabled={activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
                     style={activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
@@ -7060,7 +7503,13 @@ function App() {
                   </button>
                   <button
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Compliance' ? 'active' : ''}`}
-                    onClick={() => handleSettingsSectionChange('Compliance')}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!(activeSettingsSection === 'Terms and Conditions' && !tosAgreed)) {
+                        handleSettingsSectionChange('Compliance');
+                      }
+                    }}
                     disabled={activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
                     style={activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
@@ -7073,7 +7522,11 @@ function App() {
                   <button
                     ref={settingsLastItemRef}
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Terms and Conditions' ? 'active' : ''}`}
-                    onClick={() => handleSettingsSectionChange('Terms and Conditions')}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleSettingsSectionChange('Terms and Conditions');
+                    }}
                   >
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -7086,8 +7539,10 @@ function App() {
                     <span>Terms and Conditions</span>
                   </button>
                 </div>
-              </div>
-              
+            </div>
+            
+            {/* Settings Content Wrapper - Sidebar and Main Content */}
+            <div className="settings-content-wrapper" style={{ display: 'flex', flexDirection: 'row', flex: 1, minHeight: 0 }}>
               {/* Settings Main Content */}
               <div className="settings-main-content" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, position: 'relative', zIndex: 10, overflow: 'visible' }}>
                 {activeSettingsSection === 'Account' && (
@@ -8528,11 +8983,13 @@ function App() {
                               {/* Clock In/Out Times */}
                               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem' }}>
                                 <div>
-                                  <label style={{ display: 'block', marginBottom: '0.75rem', fontWeight: '700', color: '#333', fontSize: '1.1rem' }}>
+                                  <label htmlFor="timesheet-clock-in" style={{ display: 'block', marginBottom: '0.75rem', fontWeight: '700', color: '#333', fontSize: '1.1rem' }}>
                                     Clock In Time
                                   </label>
                                   <input
                                     type="time"
+                                    id="timesheet-clock-in"
+                                    name="timesheet-clock-in"
                                     value={timesheetEditData.clockIn}
                                     onChange={(e) => setTimesheetEditData(prev => ({ ...prev, clockIn: e.target.value }))}
                                     style={{
@@ -8547,11 +9004,13 @@ function App() {
                                   />
                                 </div>
                                 <div>
-                                  <label style={{ display: 'block', marginBottom: '0.75rem', fontWeight: '700', color: '#333', fontSize: '1.1rem' }}>
+                                  <label htmlFor="timesheet-clock-out" style={{ display: 'block', marginBottom: '0.75rem', fontWeight: '700', color: '#333', fontSize: '1.1rem' }}>
                                     Clock Out Time
                                   </label>
                                   <input
                                     type="time"
+                                    id="timesheet-clock-out"
+                                    name="timesheet-clock-out"
                                     value={timesheetEditData.clockOut}
                                     onChange={(e) => setTimesheetEditData(prev => ({ ...prev, clockOut: e.target.value }))}
                                     style={{
@@ -8626,9 +9085,11 @@ function App() {
                                           }}
                                         >
                                           <div>
-                                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '1rem', color: '#666', fontWeight: '600' }}>Break Start</label>
+                                            <label htmlFor={`break-start-${index}`} style={{ display: 'block', marginBottom: '0.5rem', fontSize: '1rem', color: '#666', fontWeight: '600' }}>Break Start</label>
                                             <input
                                               type="time"
+                                              id={`break-start-${index}`}
+                                              name={`break-start-${index}`}
                                               value={brk.breakOut}
                                               onChange={(e) => updateBreakInEdit(index, 'breakOut', e.target.value)}
                                               style={{
@@ -8642,9 +9103,11 @@ function App() {
                                             />
                                           </div>
                                           <div>
-                                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '1rem', color: '#666', fontWeight: '600' }}>Break End</label>
+                                            <label htmlFor={`break-end-${index}`} style={{ display: 'block', marginBottom: '0.5rem', fontSize: '1rem', color: '#666', fontWeight: '600' }}>Break End</label>
                                             <input
                                               type="time"
+                                              id={`break-end-${index}`}
+                                              name={`break-end-${index}`}
                                               value={brk.breakIn}
                                               onChange={(e) => updateBreakInEdit(index, 'breakIn', e.target.value)}
                                               style={{
@@ -9528,18 +9991,40 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
           <div className="products-header">
             <div className="header-left">
               <button className="icon-button" onClick={() => setIsCategoryModalOpen(true)}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: 'scale(2)' }}>
                   <line x1="3" y1="6" x2="21" y2="6"></line>
                   <line x1="3" y1="12" x2="21" y2="12"></line>
                   <line x1="3" y1="18" x2="21" y2="18"></line>
                 </svg>
               </button>
-              <div className="category-buttons">
+              <div 
+                className={`category-buttons ${isCategoryScrolling ? 'dragging' : ''}`}
+                ref={categoryButtonsRef}
+                onMouseDown={(e) => {
+                  // Only handle drag-to-scroll if clicking on the container itself, not on buttons
+                  if (!e.target.closest('.category-btn')) {
+                    handleCategoryScrollMouseDown(e);
+                  }
+                }}
+              >
                 {categories.map(category => (
                   <button
                     key={category}
+                    type="button"
                     className={`category-btn ${selectedCategory === category ? 'active' : ''}`}
-                    onClick={() => setSelectedCategory(category)}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      console.log('🔵 Category button clicked:', category);
+                      console.log('🔵 Current selectedCategory before:', selectedCategory);
+                      setSelectedCategory(category);
+                      console.log('🔵 setSelectedCategory called with:', category);
+                    }}
+                    onMouseDown={(e) => {
+                      // Stop the parent's drag handler from interfering
+                      e.stopPropagation();
+                    }}
+                    style={{ pointerEvents: 'auto', cursor: 'pointer', position: 'relative', zIndex: 100 }}
                   >
                     {category}
                   </button>
@@ -11752,6 +12237,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
           if (!isImporting) {
             setIsAutoImportModalOpen(false)
             setImportFile(null)
+            setImportUrl('')
             setImportError(null)
             setImportProgress(null)
           }
@@ -11765,6 +12251,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                   if (!isImporting) {
                     setIsAutoImportModalOpen(false)
                     setImportFile(null)
+                    setImportUrl('')
                     setImportError(null)
                     setImportProgress(null)
                   }
@@ -11779,10 +12266,114 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
             </div>
             <div className="modal-body" style={{ padding: '2rem' }}>
               <p style={{ marginBottom: '1.5rem', color: '#666', fontSize: '1rem' }}>
-                Upload a menu image (PNG, JPG) or PDF file. Our AI will analyze it and automatically create menu sections, products, and toppings.
+                Upload a menu image/PDF file or paste a menu URL. Our AI will analyze it and automatically create menu sections, products, descriptions, ingredients, and images.
               </p>
 
+              {/* Import Type Toggle */}
+              <div style={{ 
+                display: 'flex', 
+                gap: '0.5rem', 
+                marginBottom: '1.5rem',
+                border: '2px solid #ddd',
+                borderRadius: '8px',
+                padding: '0.25rem',
+                backgroundColor: '#fafafa'
+              }}>
+                <button
+                  onClick={() => {
+                    if (!isImporting) {
+                      setImportType('file')
+                      setImportError(null)
+                    }
+                  }}
+                  disabled={isImporting}
+                  style={{
+                    flex: 1,
+                    padding: '0.75rem 1rem',
+                    border: 'none',
+                    borderRadius: '6px',
+                    backgroundColor: importType === 'file' ? '#1e3a5f' : 'transparent',
+                    color: importType === 'file' ? '#fff' : '#666',
+                    cursor: isImporting ? 'not-allowed' : 'pointer',
+                    fontWeight: '600',
+                    fontSize: '0.95rem',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  📄 Upload File
+                </button>
+                <button
+                  onClick={() => {
+                    if (!isImporting) {
+                      setImportType('url')
+                      setImportError(null)
+                    }
+                  }}
+                  disabled={isImporting}
+                  style={{
+                    flex: 1,
+                    padding: '0.75rem 1rem',
+                    border: 'none',
+                    borderRadius: '6px',
+                    backgroundColor: importType === 'url' ? '#1e3a5f' : 'transparent',
+                    color: importType === 'url' ? '#fff' : '#666',
+                    cursor: isImporting ? 'not-allowed' : 'pointer',
+                    fontWeight: '600',
+                    fontSize: '0.95rem',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  🔗 Import from URL
+                </button>
+              </div>
+
+              {/* URL Input */}
+              {importType === 'url' && (
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <label htmlFor="menu-import-url" style={{ 
+                    display: 'block', 
+                    marginBottom: '0.5rem', 
+                    fontWeight: '600', 
+                    color: '#333',
+                    fontSize: '0.95rem'
+                  }}>
+                    Menu URL
+                  </label>
+                  <input
+                    type="url"
+                    id="menu-import-url"
+                    name="menu-import-url"
+                    value={importUrl}
+                    onChange={(e) => {
+                      setImportUrl(e.target.value)
+                      setImportError(null)
+                    }}
+                    placeholder="https://example.com/menu or https://restaurant.com/menu.pdf"
+                    disabled={isImporting}
+                    style={{
+                      width: '100%',
+                      padding: '0.875rem 1rem',
+                      border: '2px solid #ddd',
+                      borderRadius: '8px',
+                      fontSize: '1rem',
+                      boxSizing: 'border-box',
+                      transition: 'border-color 0.2s'
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = '#1e3a5f'}
+                    onBlur={(e) => e.target.style.borderColor = '#ddd'}
+                  />
+                  <p style={{ 
+                    marginTop: '0.5rem', 
+                    color: '#999', 
+                    fontSize: '0.85rem' 
+                  }}>
+                    Supports restaurant websites, menu pages, PDF links, and image URLs
+                  </p>
+                </div>
+              )}
+
               {/* Dropzone */}
+              {importType === 'file' && (
               <div
                 onDragEnter={handleDrag}
                 onDragLeave={handleDrag}
@@ -11827,6 +12418,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                       onClick={(e) => {
                         e.stopPropagation()
                         setImportFile(null)
+                        setImportUrl('')
                         setImportError(null)
                       }}
                       disabled={isImporting}
@@ -11863,6 +12455,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                   </div>
                 )}
               </div>
+              )}
 
               {/* Error Message */}
               {importError && (
@@ -11902,6 +12495,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                   if (!isImporting) {
                     setIsAutoImportModalOpen(false)
                     setImportFile(null)
+                    setImportUrl('')
                     setImportError(null)
                     setImportProgress(null)
                   }
@@ -11913,8 +12507,8 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
               <button
                 className="btn-primary-small"
                 onClick={handleMenuImport}
-                disabled={!importFile || isImporting}
-                style={{ opacity: (!importFile || isImporting) ? 0.5 : 1 }}
+                disabled={(importType === 'file' && !importFile) || (importType === 'url' && !importUrl.trim()) || isImporting}
+                style={{ opacity: ((importType === 'file' && !importFile) || (importType === 'url' && !importUrl.trim()) || isImporting) ? 0.5 : 1 }}
               >
                 {isImporting ? 'Importing...' : 'Import Menu'}
               </button>
@@ -11993,3 +12587,4 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
 
 // Export the App component
 export default App
+

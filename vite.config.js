@@ -46,4 +46,19 @@ export default defineConfig({
   envPrefix: 'VITE_',
   // Ensure SPA routing works - all routes fall back to index.html
   appType: 'spa',
+  build: {
+    // Increase chunk size warning limit to 1000KB (1MB)
+    // This is reasonable for apps with Stripe, React Router, and other libraries
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        // Manual chunk splitting for better caching
+        manualChunks: {
+          // Separate vendor chunks
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'stripe-vendor': ['@stripe/stripe-js', '@stripe/react-stripe-js', '@stripe/terminal-js'],
+        },
+      },
+    },
+  },
 });
