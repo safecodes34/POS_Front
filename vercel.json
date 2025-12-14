@@ -1,9 +1,4 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
-  "devCommand": "npm run dev",
-  "installCommand": "npm install",
-  "framework": "vite",
   "rewrites": [
     {
       "source": "/(.*)",
@@ -28,7 +23,7 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1; script-src-elem 'self' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1; connect-src 'self' https://localhost:4001 https://api.stripe.com https://posback-production-2407.up.railway.app; object-src 'none';"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1 blob:; script-src-elem 'self' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.stripe.com https://posback-production-2407.up.railway.app blob:; img-src 'self' data: https: blob:; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self';"
         }
       ]
     }

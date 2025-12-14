@@ -106,6 +106,8 @@ html, body, #root {
   box-sizing: border-box;
   min-height: 0; /* Allow flex shrinking */
   position: relative; /* For fixed sidebar positioning */
+  /* Ensure nothing blocks the fixed sidebar */
+  isolation: isolate;
 }
 
 .settings-content-wrapper {
@@ -119,6 +121,8 @@ html, body, #root {
   overflow: visible;
   /* Push content right to account for fixed sidebar */
   margin-left: calc(var(--settings-sidebar-w) + 16px);
+  /* Ensure wrapper doesn't block sidebar clicks */
+  pointer-events: none;
 }
 
 /* Enable scrolling for Compliance and Terms and Conditions routes */
@@ -137,11 +141,12 @@ html, body, #root {
   align-items: center;
   justify-content: space-between;
   padding: 1.25rem 1.875rem;
-  padding-bottom: calc(1.25rem + 1px);
+  padding-bottom: calc(1.25rem - 9px);
   border-bottom: 2px solid #c0c0c0;
   gap: 1.25rem;
   background-color: #ffffff;
   min-height: 85px;
+  overflow: visible;
 }
 
 .header-left {
@@ -149,6 +154,10 @@ html, body, #root {
   align-items: center;
   gap: 1.25rem;
   flex: 1;
+  min-width: 0;
+  overflow: visible;
+  align-self: stretch;
+  padding-bottom: 0;
 }
 
 .icon-button {
@@ -162,6 +171,7 @@ html, body, #root {
   color: #333;
   border-radius: 4px;
   transition: background-color 0.2s;
+  flex-shrink: 0;
 }
 
 .icon-button:hover {
@@ -171,6 +181,49 @@ html, body, #root {
 .category-buttons {
   display: flex;
   gap: 0.625rem;
+  overflow-x: auto;
+  overflow-y: visible;
+  flex: 1;
+  min-width: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #c0c0c0 transparent;
+  -webkit-overflow-scrolling: touch;
+  align-items: center;
+  cursor: grab;
+  height: 100%;
+  padding: 0;
+  padding-bottom: 9px;
+  margin: 0;
+  transform: translateY(9px);
+}
+
+.category-buttons.dragging {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.category-buttons.dragging .category-btn {
+  cursor: grabbing !important;
+  /* Don't disable pointer events - allow clicks even while dragging container */
+}
+
+.category-buttons::-webkit-scrollbar {
+  height: 6px;
+}
+
+.category-buttons::-webkit-scrollbar-track {
+  background: transparent;
+  margin-top: 3px;
+}
+
+.category-buttons::-webkit-scrollbar-thumb {
+  background-color: #c0c0c0;
+  border-radius: 3px;
+  margin-top: 3px;
+}
+
+.category-buttons::-webkit-scrollbar-thumb:hover {
+  background-color: #999;
 }
 
 .category-btn {
@@ -183,6 +236,16 @@ html, body, #root {
   font-size: 1.05rem;
   font-weight: 600;
   transition: all 0.2s;
+  white-space: nowrap;
+  pointer-events: auto;
+  position: relative;
+  z-index: 10;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  line-height: 1;
 }
 
 .category-btn:hover {
@@ -216,6 +279,9 @@ html, body, #root {
   color: #222;
   transition: all 0.2s;
   margin-right: 1.25rem;
+  box-sizing: border-box;
+  line-height: 1;
+  height: auto;
 }
 
 .edit-menu-btn:hover {
@@ -254,6 +320,8 @@ html, body, #root {
   display: flex;
   align-items: center;
   transform: translateX(-10px);
+  flex-shrink: 0;
+  align-self: stretch;
 }
 
 .search-bar {
@@ -265,6 +333,9 @@ html, body, #root {
   border-radius: 20px;
   border: 2px solid #bbb;
   min-width: 280px;
+  box-sizing: border-box;
+  line-height: 1;
+  height: auto;
 }
 
 .search-bar svg {
@@ -2733,8 +2804,11 @@ html, body, #root {
   box-sizing: border-box;
   padding: 12px 12px 24px; /* Bottom padding so last item clears border */
   background: #fff;
-  z-index: 20;
+  z-index: 1000;
   border-right: 2px solid #c0c0c0;
+  pointer-events: auto;
+  /* Ensure sidebar is always on top and clickable */
+  isolation: isolate;
 }
 
 .settings-sidebar-content {
@@ -2765,6 +2839,17 @@ html, body, #root {
   transition: all 0.2s;
   text-align: left;
   width: 100%;
+  pointer-events: auto;
+  position: relative;
+  z-index: 1001;
+  /* Ensure button is clickable */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.settings-sidebar-btn:disabled {
+  pointer-events: none;
+  cursor: not-allowed;
 }
 
 .settings-sidebar-btn:hover {
@@ -2783,10 +2868,12 @@ html, body, #root {
   flex-shrink: 0;
   width: 24px;
   height: 24px;
+  pointer-events: none;
 }
 
 .settings-sidebar-btn span {
   white-space: nowrap;
+  pointer-events: none;
 }
 
 @media (max-width: 768px) {
@@ -2803,6 +2890,7 @@ html, body, #root {
   min-width: 0;
   overflow: visible;
   /* Content is already pushed right by .settings-content-wrapper margin-left */
+  pointer-events: auto;
 }
 
 /* Settings Content - Hide scrollbar but keep scroll */

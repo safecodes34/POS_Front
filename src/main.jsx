@@ -23,11 +23,18 @@ const AppWrapper = () => {
         const publishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY;
         
         if (!publishableKey) {
-          throw new Error('VITE_STRIPE_PUBLISHABLE_KEY is not set in environment variables.');
+          console.warn('⚠️ VITE_STRIPE_PUBLISHABLE_KEY is not set. Payment features will be unavailable.');
+          setLoading(false);
+          return; // Continue without Stripe
         }
         
         console.log('🔑 Loading Stripe with publishable key from environment variable');
-        setStripePromise(loadStripe(publishableKey));
+        const stripe = await loadStripe(publishableKey);
+        if (stripe) {
+          setStripePromise(() => stripe);
+        } else {
+          console.warn('⚠️ Failed to load Stripe. Payment features will be unavailable.');
+        }
       } catch (error) {
         console.error('Error loading Stripe publishable key:', error);
         // Don't block the app - just log the error and continue without Stripe
@@ -47,6 +54,7 @@ const AppWrapper = () => {
   // If in embed mode, render app directly (it's inside iframe)
   // Otherwise, wrap in DesktopScaledFrame which creates the iframe
   if (isEmbed) {
+    // Always wrap in Elements, but pass null if Stripe failed to load
     return (
       <Elements stripe={stripePromise}>
         {loading ? (
