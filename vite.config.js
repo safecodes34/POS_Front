@@ -20,7 +20,8 @@ export default defineConfig({
     headers: {
       // Allow eval in development (Vite uses it for HMR)
       // Allow Stripe scripts and API connections
-      'Content-Security-Policy': "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1; script-src-elem 'self' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1; connect-src 'self' https: https://api.stripe.com https://posback-production-2407.up.railway.app; object-src 'none';"
+      // Allow all HTTPS connections for local network access (192.168.x.x, 10.x.x.x, etc.)
+      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1 blob: data:; script-src-elem 'self' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1; style-src 'self' 'unsafe-inline' https://js.stripe.com; connect-src 'self' https: http: https://api.stripe.com https://posback-production-2407.up.railway.app blob: wss: ws:; img-src 'self' data: https: blob:; font-src 'self' data: https://js.stripe.com; frame-src 'self' https://js.stripe.com https://hooks.stripe.com; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self' https://js.stripe.com;"
     }
   },
   preview: {
@@ -37,7 +38,8 @@ export default defineConfig({
     headers: {
       // Allow eval in preview (Vite uses it for HMR)
       // Allow Stripe scripts and API connections
-      'Content-Security-Policy': "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1; script-src-elem 'self' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1; connect-src 'self' https: https://api.stripe.com https://posback-production-2407.up.railway.app; object-src 'none';"
+      // Allow all HTTPS connections for local network access (192.168.x.x, 10.x.x.x, etc.)
+      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1 blob: data:; script-src-elem 'self' 'unsafe-inline' https://js.stripe.com https://js.stripe.com/v3/ https://js.stripe.com/terminal/v1; style-src 'self' 'unsafe-inline' https://js.stripe.com; connect-src 'self' https: http: https://api.stripe.com https://posback-production-2407.up.railway.app blob: wss: ws:; img-src 'self' data: https: blob:; font-src 'self' data: https://js.stripe.com; frame-src 'self' https://js.stripe.com https://hooks.stripe.com; worker-src 'self' blob:; child-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self' https://js.stripe.com;"
     }
   },
   define: {

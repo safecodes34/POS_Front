@@ -4,7 +4,8 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Content Security Policy is set via vercel.json headers -->
+    <!-- Content Security Policy - allows unsafe-eval for development (Stripe Terminal requires it) -->
+    <!-- Note: CSP is set dynamically via vite.config.js HTTP headers to allow local network IPs -->
     <title>POS System</title>
     <!-- Stripe Terminal SDK -->
     <script src="https://js.stripe.com/v3/"></script>

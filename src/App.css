@@ -843,9 +843,20 @@ html, body, #root {
   display: flex;
   align-items: center;
   padding: 1.25rem calc(1.5rem + 1px) calc(1.25rem + 3px) calc(1.5rem + 1px);
-  border-bottom: 2px solid #c0c0c0;
+  border-bottom: none;
+  position: relative;
   min-height: 90px;
   flex-shrink: 0;
+}
+
+.order-type-selector::after {
+  content: '';
+  position: absolute;
+  bottom: 8px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: #c0c0c0;
 }
 
 .order-type-buttons {

@@ -6,6 +6,7 @@ import { loadStripeTerminal } from '@stripe/terminal-js'
 import { PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js'
 import { usePostEmbedHeight } from './usePostEmbedHeight'
 import { useFooterHeightVar } from './useFooterHeightVar'
+import InventoryRoutes from './pages/settings/inventory'
 
 // Sample product data
 const initialProducts = []
@@ -427,6 +428,9 @@ function App() {
   const navigate = useNavigate()
   const location = useLocation()
   
+  // Track if this is the initial mount to prevent persist effect from running on reload
+  const isInitialMountRef = useRef(true)
+  
   // Check if we're in embed mode (inside iframe)
   const isEmbed = new URLSearchParams(location.search).get('embed') === '1'
   
@@ -447,21 +451,40 @@ function App() {
     }
   }
 
-  // Helper function to get section from URL
-  const getSectionFromURL = () => {
-    const pathname = location.pathname
-    const segments = pathname.split('/').filter(Boolean)
-    if (segments.length >= 2 && segments[0] === 'Settings') {
-      // Decode URL-encoded section name (handles spaces like "Team members")
-      try {
-        return decodeURIComponent(segments[1])
-      } catch (e) {
-        // If decoding fails, return the raw segment
-        return segments[1]
-      }
-    }
-    return null
+  // Canonical slugs (URL-safe) <-> Display labels (UI-safe)
+  const settingsLabelToSlug = {
+    "Account": "account",
+    "Team members": "team-members",
+    "Schedule": "schedule",
+    "Edit time-sheets": "edit-time-sheets",
+    "Payroll": "payroll",
+    "Compliance": "compliance",
+    "inventory": "inventory",
+    "Terms and Conditions": "terms-and-conditions"
   }
+
+  const settingsSlugToLabel = Object.fromEntries(
+    Object.entries(settingsLabelToSlug).map(([label, slug]) => [slug, label])
+  )
+
+  // Normalize anything coming from the URL (old formats included)
+  const normalizeSettingsSegment = (raw) => {
+    if (!raw) return ""
+    return decodeURIComponent(raw)
+      .trim()
+      .toLowerCase()
+      .replace(/[%20\s_]+/g, "-")   // spaces/underscores -> dash
+      .replace(/-+/g, "-")           // collapse repeated dashes
+      .replace(/^-|-$/g, "")         // trim leading/trailing dashes
+  }
+
+  const getSettingsSlugFromPath = (pathname) => {
+    // supports /settings and /settings/<segment>
+    const m = pathname.match(/^\/settings(?:\/([^/?#]+))?/i)
+    return normalizeSettingsSegment(m?.[1] || "")
+  }
+
+  const getSlugForLabel = (label) => settingsLabelToSlug[label] || normalizeSettingsSegment(label)
 
   // Helper function to get category from URL query params
   const getCategoryFromURL = () => {
@@ -472,9 +495,12 @@ function App() {
   // Route mappings for hybrid routing
   const routeToPage = {
     "/Menu": null,
+    "/menu": null,
     "/Transactions": "Transaction",
+    "/transactions": "Transaction",
     "/clock": "Timesheets",
     "/settings": "Settings",
+    "/Settings": "Settings",
   }
   
   const pageToRoute = {
@@ -484,20 +510,46 @@ function App() {
     "Settings": "/settings",
   }
 
-  // Initialize activeView from URL pathname or localStorage
-  const [activeView, setActiveView] = useState(() => {
-    // First check URL pathname (new routes)
-    const pathname = location.pathname
+  // Helper to get page from pathname (case-insensitive for main routes)
+  const getPageFromPathname = (pathname) => {
+    // Normalize pathname for comparison
+    const normalizedPath = pathname.toLowerCase()
+    
+    // Check exact matches first
     if (routeToPage[pathname] !== undefined) {
       return routeToPage[pathname]
     }
-    // Fallback: check old route format
+    
+    // Check normalized matches - handle paths with segments (e.g., /settings/Team%20members)
+    if (normalizedPath === '/menu' || normalizedPath.startsWith('/menu/')) return null
+    if (normalizedPath === '/transactions' || normalizedPath.startsWith('/transactions/')) return "Transaction"
+    if (normalizedPath === '/clock' || normalizedPath.startsWith('/clock/')) return "Timesheets"
+    if (normalizedPath === '/settings' || normalizedPath.startsWith('/settings/')) return "Settings"
+    
+    // Fallback: check old route format (capitalized first segment)
     const path = pathname.split('/').filter(Boolean)[0]
     if (path && ['Transaction', 'Timesheets', 'Settings'].includes(path)) {
       return path
     }
-    // Fall back to localStorage
-    return loadFromStorage(STORAGE_KEYS.ACTIVE_VIEW, null)
+    
+    return null
+  }
+
+  // Initialize activeView from URL pathname or localStorage
+  const [activeView, setActiveView] = useState(() => {
+    // First check URL pathname (new routes) - prioritize URL over localStorage
+    const pathname = location.pathname
+    console.log('🔍 Initializing activeView from URL:', pathname)
+    const pageFromURL = getPageFromPathname(pathname)
+    console.log('🔍 Page from URL:', pageFromURL)
+    if (pageFromURL !== null) {
+      console.log('✅ Setting activeView from URL:', pageFromURL)
+      return pageFromURL
+    }
+    // Fall back to localStorage only if URL doesn't have a valid route
+    const fromStorage = loadFromStorage(STORAGE_KEYS.ACTIVE_VIEW, null)
+    console.log('📦 Falling back to localStorage:', fromStorage)
+    return fromStorage
   })
 
   // Check if we're on the menu route
@@ -779,13 +831,17 @@ function App() {
   const [isEditingSettings, setIsEditingSettings] = useState(false)
   const [lastManualDateTimeEdit, setLastManualDateTimeEdit] = useState(null)
   const [activeSettingsSection, setActiveSettingsSection] = useState(() => {
-    // Check URL first if on Settings view
+    // Check URL first if on Settings view (handles both /Settings and /settings)
     const pathname = location.pathname
-    const path = pathname.split('/').filter(Boolean)[0]
-    if (path === 'Settings') {
-      const sectionFromURL = getSectionFromURL()
-      if (sectionFromURL && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'Terms and Conditions'].includes(sectionFromURL)) {
-        return sectionFromURL
+    console.log('🔍 Initializing activeSettingsSection from URL:', pathname)
+    if (pathname.toLowerCase().startsWith('/settings')) {
+      const slug = getSettingsSlugFromPath(pathname)
+      if (slug) {
+        const labelFromSlug = settingsSlugToLabel[slug] || 'Account'
+        if (['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'inventory', 'Terms and Conditions'].includes(labelFromSlug)) {
+          console.log('✅ Setting activeSettingsSection from URL:', labelFromSlug)
+          return labelFromSlug
+        }
       }
     }
     // Fall back to localStorage or default
@@ -793,7 +849,8 @@ function App() {
       const stored = localStorage.getItem('pos_active_settings_section')
       if (stored) {
         const parsed = JSON.parse(stored)
-        if (['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'Terms and Conditions'].includes(parsed)) {
+        if (['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'inventory', 'Terms and Conditions'].includes(parsed)) {
+          console.log('📦 Falling back to localStorage for activeSettingsSection:', parsed)
           return parsed
         }
       }
@@ -811,9 +868,43 @@ function App() {
       return false
     }
   })
+
+  // Load TOS agreement status from backend
+  const loadTosStatusFromBackend = async () => {
+    if (!currentUser || !currentUser.email) {
+      console.log('⚠️ Cannot load TOS status: user not logged in')
+      return false
+    }
+    
+    try {
+      console.log('📡 Loading TOS status from backend for user:', currentUser.email)
+      const response = await axios.get(`${API_BASE_URL}/user/tos-status`, {
+        params: {
+          email: currentUser.email
+        }
+      })
+      
+      if (response.data && response.data.tosAgreed) {
+        setTosAgreed(true)
+        localStorage.setItem('pos_tos_agreed', 'true')
+        console.log('✅ TOS status loaded from backend: Agreed')
+        return true
+      } else {
+        setTosAgreed(false)
+        localStorage.setItem('pos_tos_agreed', 'false')
+        console.log('✅ TOS status loaded from backend: Not agreed')
+        return false
+      }
+    } catch (error) {
+      console.error('❌ Error loading TOS status:', error)
+      return false
+    }
+  }
   const tosContentRef = useRef(null)
   const settingsContentRef = useRef(null)
   const [teamMembers, setTeamMembers] = useState(() => loadFromStorage(STORAGE_KEYS.TEAM_MEMBERS, []))
+  // Ref to track if we just did a manual save (to prevent auto-save from running immediately after)
+  const justSavedTeamMembersRef = useRef(false)
   const [weeklySchedule, setWeeklySchedule] = useState(() => {
     try {
       const stored = localStorage.getItem('pos_weekly_schedule')
@@ -887,6 +978,24 @@ function App() {
     } else {
       // With extension: XXX-XXX-XXXX-XXXX
       return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3, 6)}-${limitedNumbers.slice(6, 10)}-${limitedNumbers.slice(10)}`
+    }
+  }
+
+  // Function to format phone number as 000-000-0000 (10 digits only)
+  const formatPhoneNumber = (value) => {
+    // Remove all non-numeric characters
+    const numbers = value.replace(/\D/g, '')
+    
+    // Limit to 10 digits
+    const limitedNumbers = numbers.slice(0, 10)
+    
+    // Format: XXX-XXX-XXXX
+    if (limitedNumbers.length <= 3) {
+      return limitedNumbers
+    } else if (limitedNumbers.length <= 6) {
+      return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3)}`
+    } else {
+      return `${limitedNumbers.slice(0, 3)}-${limitedNumbers.slice(3, 6)}-${limitedNumbers.slice(6)}`
     }
   }
 
@@ -1178,55 +1287,73 @@ function App() {
   }, [categories, currentUser])
 
   // Auto-save team members to backend when they change (if user is logged in)
+  // Note: We also save immediately on add/edit/remove, but this serves as a backup
+  // IMPORTANT: Don't save empty arrays automatically (only on explicit logout save)
+  // This prevents the auto-save from overwriting data when teamMembers is cleared during logout
   useEffect(() => {
-    if (currentUser && currentUser.email && teamMembers.length >= 0) {
-      saveTeamMembersToBackend(teamMembers)
+    // Skip auto-save if we just did a manual save (to avoid duplicate saves)
+    if (justSavedTeamMembersRef.current) {
+      justSavedTeamMembersRef.current = false
+      console.log('⏭️ AUTO-SAVE: Skipping auto-save (manual save just completed)')
+      return
+    }
+    
+    if (currentUser && currentUser.email && teamMembers.length > 0) {
+      // Debounce to avoid too many saves during rapid changes
+      const timeoutId = setTimeout(() => {
+        console.log('💾 AUTO-SAVE: Saving team members to backend (auto-save):', {
+          userEmail: currentUser.email,
+          count: teamMembers.length
+        })
+        saveTeamMembersToBackend(teamMembers).catch(error => {
+          console.error('❌ AUTO-SAVE: Error saving team members:', error)
+        })
+      }, 500) // Wait 500ms after last change
+      
+      return () => clearTimeout(timeoutId)
+    } else if (currentUser && currentUser.email && teamMembers.length === 0) {
+      // Log when we skip saving empty array (this is expected during logout)
+      console.log('⚠️ AUTO-SAVE: Skipping save of empty team members array (this is normal during logout)')
     }
   }, [teamMembers, currentUser])
 
-  // Redirect from / to /Menu on initial load, and from /menu to /Menu for backward compatibility
-  // Also redirect /transactions to /Transactions
+  // Redirect from / to /Menu on initial load, and normalize route casing
+  // Only redirect if we're on root or need to normalize casing - preserve all other routes
   // This must run BEFORE the sync effect to ensure URL is correct
   useEffect(() => {
-    if (location.pathname === '/' || location.pathname === '') {
-      navigate('/Menu', { replace: true })
+    const pathname = location.pathname
+    const search = location.search
+    
+    // Only redirect root path - preserve all other routes
+    if (pathname === '/' || pathname === '') {
+      // Check if we have a saved route in localStorage to restore
+      const savedView = loadFromStorage(STORAGE_KEYS.ACTIVE_VIEW, null)
+      if (savedView && pageToRoute[savedView]) {
+        let restoreRoute = pageToRoute[savedView]
+        // If Settings, try to restore the section too
+        if (savedView === 'Settings') {
+          try {
+            const savedSection = localStorage.getItem('pos_active_settings_section')
+            if (savedSection) {
+              const section = JSON.parse(savedSection)
+              if (section && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'inventory', 'Terms and Conditions'].includes(section)) {
+                const slug = getSlugForLabel(section)
+                restoreRoute = `${restoreRoute}/${slug}`
+              }
+            }
+          } catch (e) {
+            // Ignore parse errors
+          }
+        }
+        navigate(restoreRoute + search, { replace: true })
+      } else {
+        navigate('/Menu' + search, { replace: true })
+      }
       // Also update parent window URL if in iframe (for DesktopScaledFrame)
       try {
         if (window.self !== window.top && window.top.location.hostname === window.location.hostname) {
           const newUrl = new URL(window.top.location.href)
-          newUrl.pathname = '/Menu'
-          window.top.history.replaceState({}, '', newUrl.toString())
-        }
-      } catch (e) {
-        // Cross-origin or other security restriction - ignore
-      }
-      return
-    } else if (location.pathname === '/menu') {
-      // Redirect lowercase /menu to capitalized /Menu
-      const search = location.search // Preserve query params
-      navigate(`/Menu${search}`, { replace: true })
-      // Also update parent window URL if in iframe
-      try {
-        if (window.self !== window.top && window.top.location.hostname === window.location.hostname) {
-          const newUrl = new URL(window.top.location.href)
-          newUrl.pathname = '/Menu'
-          if (search) newUrl.search = search
-          window.top.history.replaceState({}, '', newUrl.toString())
-        }
-      } catch (e) {
-        // Cross-origin or other security restriction - ignore
-      }
-      return
-    } else if (location.pathname === '/transactions') {
-      // Redirect lowercase /transactions to capitalized /Transactions
-      const search = location.search // Preserve query params
-      navigate(`/Transactions${search}`, { replace: true })
-      // Also update parent window URL if in iframe
-      try {
-        if (window.self !== window.top && window.top.location.hostname === window.location.hostname) {
-          const newUrl = new URL(window.top.location.href)
-          newUrl.pathname = '/Transactions'
-          if (search) newUrl.search = search
+          newUrl.pathname = pathname === '/' || pathname === '' ? '/Menu' : pathname
           window.top.history.replaceState({}, '', newUrl.toString())
         }
       } catch (e) {
@@ -1234,75 +1361,133 @@ function App() {
       }
       return
     }
+    
+    // Normalize route casing only (preserve path segments and query params)
+    const normalizedPath = pathname.toLowerCase()
+    if (normalizedPath === '/menu' && pathname !== '/Menu') {
+      navigate(`/Menu${search}`, { replace: true })
+      return
+    } else if (normalizedPath === '/transactions' && pathname !== '/Transactions') {
+      navigate(`/Transactions${search}`, { replace: true })
+      return
+    } else if (normalizedPath === '/settings' && pathname !== '/settings') {
+      // Preserve Settings path segments (like /Settings/Team%20members)
+      const segments = pathname.split('/').filter(Boolean)
+      if (segments[0] === 'Settings') {
+        // Keep the original path but normalize the base route
+        const newPath = '/settings' + (segments.length > 1 ? '/' + segments.slice(1).join('/') : '')
+        navigate(newPath + search, { replace: true })
+        return
+      }
+    }
   }, [location.pathname, location.search, navigate])
 
-  // Sync URL -> activeView when location changes (browser back/forward, direct URL access)
+  // Sync URL -> activeView when location changes (browser back/forward, direct URL access, page reload)
+  // This effect has priority - it reads from URL and updates state
+  // CRITICAL: This must run before the persist effect to ensure URL is source of truth on reload
   useEffect(() => {
     const pathname = location.pathname
-    // Check new route format first
-    if (routeToPage[pathname] !== undefined) {
-      const page = routeToPage[pathname]
+    console.log('🔄 URL sync effect - pathname:', pathname)
+    const pageFromURL = getPageFromPathname(pathname)
+    console.log('🔄 Page from URL in sync effect:', pageFromURL)
+    
+    if (pageFromURL !== null) {
       setActiveView(prevView => {
-        // Only update if different to avoid unnecessary re-renders
-        if (prevView !== page) {
-          return page
+        // Always update from URL on reload - URL is source of truth
+        if (prevView !== pageFromURL) {
+          console.log('🔄 Updating activeView from', prevView, 'to', pageFromURL, '(URL is source of truth)')
+          return pageFromURL
+        }
+        console.log('🔄 activeView already matches URL:', prevView)
+        return prevView
+      })
+    } else if (pathname === '/' || pathname === '' || pathname.toLowerCase() === '/menu') {
+      // Root path or menu path should set activeView to null
+      setActiveView(prevView => {
+        if (prevView !== null) {
+          console.log('🔄 Setting activeView to null (Menu route)')
+          return null
         }
         return prevView
       })
-    } else {
-      // Fallback: check old route format
-      const path = pathname.split('/').filter(Boolean)[0]
-      if (path && ['Transaction', 'Timesheets', 'Settings'].includes(path)) {
-        setActiveView(prevView => {
-          if (prevView !== path) {
-            return path
-          }
-          return prevView
-        })
-      } else if (pathname === '/' || pathname === '' || pathname === '/menu' || pathname === '/Menu') {
-        // Root path or menu path should set activeView to null
-        setActiveView(prevView => {
-          if (prevView !== null) {
-            return null
-          }
-          return prevView
-        })
-      }
     }
   }, [location.pathname])
 
   // Persist activeView to localStorage and URL pathname
+  // IMPORTANT: This effect should NOT override the URL on initial load/reload
+  // It only updates URL when activeView changes due to user navigation, not on reload
   useEffect(() => {
+    // Skip on initial mount - let URL sync effect handle initial state
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false
+      console.log('⏭️ Skipping persist effect on initial mount - URL sync will handle it')
+      return
+    }
+    
     try {
+      // Check if current URL already matches what we want to set
+      // If it does, we're likely on a reload and should not navigate
+      const currentPathname = location.pathname || ""
+      const pathLower = currentPathname.toLowerCase()
+      const expectedRoute = activeView ? (pageToRoute[activeView] || '/Menu') : '/Menu'
+      const routeLower = expectedRoute.toLowerCase()
+      
+      // ✅ Settings owns a whole route family: /settings/*
+      // Don't override Settings sub-routes when sidebar navigates
+      if (activeView === 'Settings') {
+        if (pathLower.startsWith('/settings')) {
+          // Already on a Settings sub-route - don't override it!
+          localStorage.setItem(STORAGE_KEYS.ACTIVE_VIEW, JSON.stringify(activeView))
+          return
+        }
+      } else if (activeView) {
+        // ✅ Other pages: use startsWith() to support subroutes (case-insensitive)
+        if (pathLower.startsWith(routeLower)) {
+          // Already on this route or a subroute - don't override it!
+          localStorage.setItem(STORAGE_KEYS.ACTIVE_VIEW, JSON.stringify(activeView))
+          return
+        }
+      }
+      
+      let expectedURL = expectedRoute
+      
+      if (activeView === 'Settings') {
+        // Use current URL slug if available, otherwise use activeSettingsSection
+        const slug = getSettingsSlugFromPath(location.pathname)
+        if (slug && settingsSlugToLabel[slug]) {
+          expectedURL = `${expectedRoute}/${slug}`
+        } else if (activeSettingsSection) {
+          const slug = getSlugForLabel(activeSettingsSection)
+          expectedURL = `${expectedRoute}/${slug}`
+        }
+      }
+      
+      // Check if URL already matches - if so, we're on a reload, just save to localStorage
+      const urlAlreadyMatches = currentPathname === expectedURL
+      
       if (activeView) {
         localStorage.setItem(STORAGE_KEYS.ACTIVE_VIEW, JSON.stringify(activeView))
-        // Update URL pathname using new route format
-        const expectedRoute = pageToRoute[activeView] || '/Menu'
-        let newURL = expectedRoute
-        // If Settings view, preserve or add section
-        if (activeView === 'Settings') {
-          const currentSection = getSectionFromURL()
-          if (currentSection && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'Terms and Conditions'].includes(currentSection)) {
-            newURL = `${expectedRoute}/${encodeURIComponent(currentSection)}`
-          } else {
-            newURL = `${expectedRoute}/${encodeURIComponent(activeSettingsSection)}`
-          }
-        }
-        // Only navigate if URL doesn't match
-        if (location.pathname !== newURL && !location.pathname.startsWith(newURL + '/')) {
-          navigate(newURL, { replace: false })
+        console.log('💾 Persisting activeView to localStorage:', activeView, 'URL matches:', urlAlreadyMatches)
+        
+        // Only navigate if URL doesn't match AND we're not on initial load (URL is already correct)
+        if (!urlAlreadyMatches) {
+          console.log('🔄 URL mismatch - navigating from', currentPathname, 'to', expectedURL)
+          navigate(expectedURL, { replace: false })
           // Also update parent window URL if in iframe
           try {
             if (window.self !== window.top && window.top.location.hostname === window.location.hostname) {
               const parentUrl = new URL(window.top.location.href)
-              parentUrl.pathname = newURL
+              parentUrl.pathname = expectedURL
               window.top.history.replaceState({}, '', parentUrl.toString())
             }
           } catch (e) {
             // Cross-origin or other security restriction - ignore
           }
+        } else {
+          console.log('✅ URL already matches expected route, skipping navigation (likely reload)')
         }
       } else {
+        // activeView is null (Menu view)
         localStorage.removeItem(STORAGE_KEYS.ACTIVE_VIEW)
         // Update URL to /Menu with category query param if needed
         const params = new URLSearchParams(location.search)
@@ -1311,24 +1496,8 @@ function App() {
         if (categoryParam && categoryParam !== 'All') {
           newURL = `/Menu?category=${encodeURIComponent(categoryParam)}`
         }
-        // Only navigate if URL doesn't match
-        if (location.pathname !== newURL && location.pathname !== '/Menu' && location.pathname !== '/menu') {
-          navigate(newURL, { replace: false })
-          // Also update parent window URL if in iframe
-          try {
-            if (window.self !== window.top && window.top.location.hostname === window.location.hostname) {
-              const parentUrl = new URL(window.top.location.href)
-              parentUrl.pathname = newURL
-              if (categoryParam && categoryParam !== 'All') {
-                parentUrl.search = `?category=${encodeURIComponent(categoryParam)}`
-              } else {
-                parentUrl.search = ''
-              }
-              window.top.history.replaceState({}, '', parentUrl.toString())
-            }
-          } catch (e) {
-            // Cross-origin or other security restriction - ignore
-          }
+        if (currentPathname !== newURL && currentPathname !== '/Menu' && currentPathname !== '/menu') {
+          navigate(newURL, { replace: true })
         }
       }
     } catch (error) {
@@ -1336,22 +1505,16 @@ function App() {
     }
   }, [activeView, activeSettingsSection, location.pathname, location.search, navigate])
 
-  // Persist activeSettingsSection to URL and localStorage
+  // Persist activeSettingsSection to localStorage only (navigation handled by click handler)
   useEffect(() => {
-    if (activeView === 'Settings') {
+    if (activeSettingsSection) {
       try {
         localStorage.setItem('pos_active_settings_section', JSON.stringify(activeSettingsSection))
-        // Update URL to include section using new route format
-        const baseRoute = pageToRoute['Settings'] || '/settings'
-        const currentSection = getSectionFromURL()
-        if (currentSection !== activeSettingsSection) {
-          navigate(`${baseRoute}/${encodeURIComponent(activeSettingsSection)}`, { replace: true })
-        }
       } catch (error) {
-        console.error('Error saving activeSettingsSection:', error)
+        console.error('Error saving activeSettingsSection to localStorage:', error)
       }
     }
-  }, [activeSettingsSection, activeView, location.pathname, navigate])
+  }, [activeSettingsSection])
 
   // Persist selectedCategory to URL when on main menu
   useEffect(() => {
@@ -1371,32 +1534,79 @@ function App() {
     }
   }, [selectedCategory, activeView, navigate]) // Removed location.search to avoid circular updates
 
-  // Navigation function that updates both state and URL
-  const goToPage = useCallback((page) => {
-    setActiveView(page)
-    const route = pageToRoute[page] || '/Menu'
-    navigate(route, { replace: false })
-    // Also update parent window URL if in iframe (for DesktopScaledFrame)
+  // Helper to sync parent window URL when embedded in iframe
+  const syncTopUrl = useCallback((pathname, { replace = true } = {}) => {
     try {
       if (window.self !== window.top && window.top.location.hostname === window.location.hostname) {
         const newUrl = new URL(window.top.location.href)
-        newUrl.pathname = route
-        window.top.history.replaceState({}, '', newUrl.toString())
+        newUrl.pathname = pathname
+        if (replace) {
+          window.top.history.replaceState({}, '', newUrl.toString())
+        } else {
+          window.top.history.pushState({}, '', newUrl.toString())
+        }
       }
     } catch (e) {
       // Cross-origin or other security restriction - ignore
     }
-  }, [navigate, pageToRoute])
+  }, [])
 
-  // Restore section from URL when on Settings page
-  useEffect(() => {
-    if (activeView === 'Settings') {
-      const sectionFromURL = getSectionFromURL()
-      if (sectionFromURL && ['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'Terms and Conditions'].includes(sectionFromURL)) {
-        setActiveSettingsSection(sectionFromURL)
-      }
+  // Navigation function that updates both state and URL
+  const goToPage = useCallback((page) => {
+    setActiveView(page)
+    let route = pageToRoute[page] || '/Menu'
+    
+    // ✅ if going to Settings, go straight to a concrete subroute
+    if (page === 'Settings') {
+      const label = activeSettingsSection || 'Account'
+      route = `/settings/${getSlugForLabel(label)}`
     }
-  }, [location.pathname, activeView])
+    
+    navigate(route, { replace: false })
+    // Also update parent window URL if in iframe (for DesktopScaledFrame)
+    syncTopUrl(route, { replace: false })
+  }, [navigate, pageToRoute, activeSettingsSection, syncTopUrl])
+
+  // Sync URL → state (refresh/back/initial load)
+  // This is the ONLY effect that reads from URL and updates state
+  useEffect(() => {
+    if (!location.pathname.toLowerCase().startsWith("/settings")) return
+
+    const slug = getSettingsSlugFromPath(location.pathname)
+
+    // If user is at /settings with no section, redirect to default (and keep it stable)
+    if (!slug) {
+      const defaultLabel =
+        (() => {
+          try {
+            const stored = localStorage.getItem('pos_active_settings_section')
+            if (stored) {
+              const parsed = JSON.parse(stored)
+              if (['Account', 'Team members', 'Schedule', 'Edit time-sheets', 'Payroll', 'Compliance', 'inventory', 'Terms and Conditions'].includes(parsed)) {
+                return parsed
+              }
+            }
+          } catch (e) {
+            // Ignore parse errors
+          }
+          return 'Account'
+        })()
+      const defaultSlug = getSlugForLabel(defaultLabel)
+      navigate(`/settings/${defaultSlug}`, { replace: true })
+      return
+    }
+
+    // Map slug to label (with backward compatibility for old URL formats)
+    const labelFromSlug = settingsSlugToLabel[slug] || 'Account'
+
+    // Only update state if it doesn't match URL (avoid unnecessary updates)
+    setActiveSettingsSection(prevSection => {
+      if (prevSection !== labelFromSlug) {
+        return labelFromSlug
+      }
+      return prevSection
+    })
+  }, [location.pathname, navigate]) // Only pathname triggers sync; navigate is stable from react-router
 
   // DEBUG: Measure settings sidebar cutoff issue
   useEffect(() => {
@@ -1590,16 +1800,36 @@ function App() {
     } catch (error) {
       console.error('Error saving weekly schedule to localStorage:', error)
     }
-  }, [weeklySchedule])
+    
+    // Auto-save to backend if user is logged in
+    if (currentUser && currentUser.email && Object.keys(weeklySchedule).length > 0) {
+      const timeoutId = setTimeout(() => {
+        saveScheduleToBackend(weeklySchedule).catch(error => {
+          console.error('❌ AUTO-SAVE: Error saving schedule to backend:', error)
+        })
+      }, 500) // Debounce
+      return () => clearTimeout(timeoutId)
+    }
+  }, [weeklySchedule, currentUser])
 
-  // Save timesheet entries to localStorage whenever they change
+  // Save timesheet entries to localStorage and backend whenever they change
   useEffect(() => {
     try {
       localStorage.setItem('pos_timesheet_entries', JSON.stringify(timesheetEntries))
     } catch (error) {
       console.error('Error saving timesheet entries to localStorage:', error)
     }
-  }, [timesheetEntries])
+    
+    // Auto-save to backend if user is logged in
+    if (currentUser && currentUser.email && Object.keys(timesheetEntries).length > 0) {
+      const timeoutId = setTimeout(() => {
+        saveTimesheetsToBackend(timesheetEntries).catch(error => {
+          console.error('❌ AUTO-SAVE: Error saving timesheets to backend:', error)
+        })
+      }, 500) // Debounce
+      return () => clearTimeout(timeoutId)
+    }
+  }, [timesheetEntries, currentUser])
 
   // Save authenticated employees to localStorage whenever they change
   useEffect(() => {
@@ -1714,14 +1944,24 @@ function App() {
     return { success: true }
   }
 
-  // Save payroll info to localStorage whenever it changes
+  // Save payroll info to localStorage and backend whenever it changes
   useEffect(() => {
     try {
       localStorage.setItem('pos_payroll_info', JSON.stringify(payrollInfo))
     } catch (error) {
       console.error('Error saving payroll info to localStorage:', error)
     }
-  }, [payrollInfo])
+    
+    // Auto-save to backend if user is logged in
+    if (currentUser && currentUser.email && Object.keys(payrollInfo).length > 0) {
+      const timeoutId = setTimeout(() => {
+        savePayrollToBackend(payrollInfo).catch(error => {
+          console.error('❌ AUTO-SAVE: Error saving payroll to backend:', error)
+        })
+      }, 500) // Debounce
+      return () => clearTimeout(timeoutId)
+    }
+  }, [payrollInfo, currentUser])
 
   // Ref to track previous settings to prevent unnecessary saves
   const prevSettingsRef = useRef(null)
@@ -1809,13 +2049,28 @@ function App() {
   }, [activeSettingsSection])
 
   // Wrapper function to handle settings section changes with TOS protection
-  const handleSettingsSectionChange = (newSection) => {
+  // Click handler owns navigation - updates state immediately and navigates
+  const handleSettingsSectionChange = (label) => {
     // If currently on TOS page and user hasn't agreed, prevent navigation
     if (activeSettingsSection === 'Terms and Conditions' && !tosAgreed) {
       alert('You must scroll to the bottom and click "I Agree" before you can navigate away from the Terms and Conditions page.')
       return
     }
-    setActiveSettingsSection(newSection)
+    
+    const slug = getSlugForLabel(label)
+    const nextPath = `/settings/${slug}`
+    
+    // Always update state immediately for responsive UI
+    setActiveSettingsSection(label)
+    
+    // Navigate to update URL - now safe because global sync effect won't override it
+    navigate(nextPath, { replace: true })
+    
+    // ✅ update browser address bar when embedded in iframe
+    syncTopUrl(nextPath, { replace: true })
+    
+    // Debug: check if running in iframe
+    console.log('in iframe?', window.self !== window.top)
   }
 
   // Prevent navigation away from TOS page via view changes
@@ -2286,6 +2541,24 @@ function App() {
     }
   }
 
+  // Strict file validation - only PNG, JPG/JPEG, and PDF
+  const isValidFile = (file) => {
+    if (!file) return false
+    const okMime = ['image/png', 'image/jpeg', 'application/pdf'].includes(file.type)
+    const okExt = /\.(png|jpe?g|pdf)$/i.test(file.name)
+    return okMime || okExt
+  }
+
+  // URL validation
+  const isValidHttpUrl = (s) => {
+    try {
+      const u = new URL(s)
+      return u.protocol === 'http:' || u.protocol === 'https:'
+    } catch {
+      return false
+    }
+  }
+
   const handleDrop = (e) => {
     e.preventDefault()
     e.stopPropagation()
@@ -2293,24 +2566,30 @@ function App() {
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0]
-      if (file.type.startsWith('image/') || file.type === 'application/pdf') {
+      if (isValidFile(file)) {
         setImportFile(file)
         setImportError(null)
       } else {
-        setImportError('Please upload an image (PNG, JPG) or PDF file')
+        setImportError('Unsupported file type. Only PNG, JPG/JPEG, and PDF are allowed.')
+        e.dataTransfer.clearData()
       }
     }
   }
 
   const handleFileInput = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0]
-      if (file.type.startsWith('image/') || file.type === 'application/pdf') {
-        setImportFile(file)
-        setImportError(null)
-      } else {
-        setImportError('Please upload an image (PNG, JPG) or PDF file')
-      }
+    const file = e.target.files?.[0]
+    if (!file) {
+      e.target.value = ''
+      return
+    }
+    
+    if (isValidFile(file)) {
+      setImportFile(file)
+      setImportError(null)
+    } else {
+      setImportError('Unsupported file type. Only PNG, JPG/JPEG, and PDF are allowed.')
+      e.target.value = ''
+      setImportFile(null)
     }
   }
 
@@ -2328,10 +2607,8 @@ function App() {
 
     // Validate URL format if URL import
     if (importType === 'url') {
-      try {
-        new URL(importUrl.trim())
-      } catch (e) {
-        setImportError('Please enter a valid URL (e.g., https://example.com/menu)')
+      if (!isValidHttpUrl(importUrl.trim())) {
+        setImportError('Please enter a valid HTTP/HTTPS URL (e.g., https://example.com/menu)')
         return
       }
     }
@@ -3442,17 +3719,60 @@ function App() {
       // 5. Save team members to localStorage (already done by useEffect, but ensure it's saved)
       localStorage.setItem(STORAGE_KEYS.TEAM_MEMBERS, JSON.stringify(teamMembers))
       
-      // 6. Save timesheet entries to localStorage (already done by useEffect, but ensure it's saved)
-      localStorage.setItem('pos_timesheet_entries', JSON.stringify(timesheetEntries))
+      // 5a. Sync team members to backend if user is logged in
+      if (currentUser && currentUser.email) {
+        try {
+          console.log('💾 LOGOUT: Saving team members to backend before logout:', {
+            userEmail: currentUser.email,
+            count: teamMembers.length,
+            members: teamMembers
+          })
+          await saveTeamMembersToBackend(teamMembers)
+          console.log('✅ LOGOUT: Successfully synced team members to backend before logout')
+        } catch (teamMembersError) {
+          console.error('❌ LOGOUT: Could not sync team members to backend:', teamMembersError.message)
+          console.error('❌ LOGOUT: Error details:', teamMembersError)
+          // Continue with logout even if team members sync fails
+        }
+      } else {
+        console.warn('⚠️ LOGOUT: Cannot save team members - no current user')
+      }
       
-      // 7. Save weekly schedule to localStorage (already done by useEffect, but ensure it's saved)
+      // 6. Save timesheet entries to localStorage and backend
+      localStorage.setItem('pos_timesheet_entries', JSON.stringify(timesheetEntries))
+      if (currentUser && currentUser.email) {
+        try {
+          await saveTimesheetsToBackend(timesheetEntries)
+          console.log('✅ LOGOUT: Successfully synced timesheets to backend before logout')
+        } catch (error) {
+          console.error('❌ LOGOUT: Could not sync timesheets to backend:', error.message)
+        }
+      }
+      
+      // 7. Save weekly schedule to localStorage and backend
       localStorage.setItem('pos_weekly_schedule', JSON.stringify(weeklySchedule))
+      if (currentUser && currentUser.email) {
+        try {
+          await saveScheduleToBackend(weeklySchedule)
+          console.log('✅ LOGOUT: Successfully synced schedule to backend before logout')
+        } catch (error) {
+          console.error('❌ LOGOUT: Could not sync schedule to backend:', error.message)
+        }
+      }
       
       // 8. Save W-4 files to localStorage (already done by useEffect, but ensure it's saved)
       localStorage.setItem('pos_w4_files', JSON.stringify(w4Files))
       
-      // 9. Save payroll info to localStorage (already done by useEffect, but ensure it's saved)
+      // 9. Save payroll info to localStorage and backend
       localStorage.setItem('pos_payroll_info', JSON.stringify(payrollInfo))
+      if (currentUser && currentUser.email) {
+        try {
+          await savePayrollToBackend(payrollInfo)
+          console.log('✅ LOGOUT: Successfully synced payroll to backend before logout')
+        } catch (error) {
+          console.error('❌ LOGOUT: Could not sync payroll to backend:', error.message)
+        }
+      }
       
       // 10. Save authenticated employees to localStorage (already done by useEffect, but ensure it's saved)
       localStorage.setItem('pos_authenticated_employees', JSON.stringify(authenticatedEmployees))
@@ -3541,20 +3861,54 @@ function App() {
     }
     
     try {
+      console.log('📡 Loading team members from backend for user:', currentUser.email)
+      console.log('   This ensures Device B sees data saved by Device A')
       const response = await axios.get(`${API_BASE_URL}/team-members`, {
         params: {
           userEmail: currentUser.email
         }
       })
       console.log('✅ Team members loaded:', response.data?.length || 0, 'members for user:', currentUser.email)
+      console.log('✅ Team members data:', response.data)
       if (response.data && Array.isArray(response.data)) {
+        // Verify all required fields are present for each team member
+        const requiredFields = ['id', 'name', 'age', 'contact', 'email', 'emergencyContact', 'hourlyPay', 'password']
+        response.data.forEach((member, index) => {
+          const missingFields = requiredFields.filter(field => !member.hasOwnProperty(field) || member[field] === undefined || member[field] === null || member[field] === '')
+          if (missingFields.length > 0) {
+            console.warn(`⚠️ Team member ${index} (${member.name || 'unnamed'}) is missing fields: ${missingFields.join(', ')}`)
+          } else {
+            console.log(`✅ Team member ${index} (${member.name}) has all required fields:`, {
+              id: member.id,
+              name: member.name,
+              age: member.age ? 'present' : 'missing',
+              contact: member.contact ? 'present' : 'missing',
+              email: member.email ? 'present' : 'missing',
+              emergencyContact: member.emergencyContact ? 'present' : 'missing',
+              hourlyPay: member.hourlyPay ? 'present' : 'missing',
+              password: member.password ? 'present (hidden)' : 'missing'
+            })
+          }
+        })
+        // CRITICAL: Always update state and localStorage with backend data (source of truth)
+        // This ensures Device B always sees the latest data from Device A
         setTeamMembers(response.data)
         localStorage.setItem(STORAGE_KEYS.TEAM_MEMBERS, JSON.stringify(response.data))
+        console.log('✅ Team members state and localStorage updated with backend data')
         return true
       }
+      // If backend returns empty array or invalid data, clear local state
+      setTeamMembers([])
+      localStorage.setItem(STORAGE_KEYS.TEAM_MEMBERS, JSON.stringify([]))
       return false
     } catch (error) {
       console.error('❌ Error loading team members:', error)
+      console.error('❌ Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        url: error.config?.url
+      })
       return false
     }
   }
@@ -3572,18 +3926,314 @@ function App() {
       return false
     }
     
+    // Validate all required fields are present for each team member
+    const requiredFields = ['id', 'name', 'age', 'contact', 'email', 'emergencyContact', 'hourlyPay', 'password']
+    teamMembersToSave.forEach((member, index) => {
+      const missingFields = requiredFields.filter(field => !member.hasOwnProperty(field) || member[field] === undefined || member[field] === null || member[field] === '')
+      if (missingFields.length > 0) {
+        console.warn(`⚠️ Team member ${index} (${member.name || 'unnamed'}) is missing fields: ${missingFields.join(', ')}`)
+      } else {
+        console.log(`✅ Team member ${index} (${member.name}) has all required fields before save`)
+      }
+    })
+    
     try {
-      await axios.post(`${API_BASE_URL}/team-members`, {
+      console.log('💾 Saving team members to backend:', {
+        userEmail: currentUser.email,
+        count: teamMembersToSave.length,
+        members: teamMembersToSave.map(m => ({
+          id: m.id,
+          name: m.name,
+          age: m.age ? 'present' : 'missing',
+          contact: m.contact ? 'present' : 'missing',
+          email: m.email ? 'present' : 'missing',
+          emergencyContact: m.emergencyContact ? 'present' : 'missing',
+          hourlyPay: m.hourlyPay ? 'present' : 'missing',
+          password: m.password ? 'present (hidden)' : 'missing'
+        }))
+      })
+      
+      const response = await axios.post(`${API_BASE_URL}/team-members`, {
         userEmail: currentUser.email,
         teamMembers: teamMembersToSave
       })
-      console.log('✅ Team members saved for user:', currentUser.email, `(${teamMembersToSave.length} members)`)
+      
+      console.log('✅ Team members saved successfully for user:', currentUser.email, `(${teamMembersToSave.length} members)`)
+      console.log('✅ Backend response:', response.data)
+      
+      // Verify the saved data matches what we sent
+      if (response.data && response.data.teamMembers) {
+        const savedCount = response.data.teamMembers.length
+        if (savedCount === teamMembersToSave.length) {
+          console.log(`✅ Verification: All ${savedCount} team members were saved successfully`)
+        } else {
+          console.warn(`⚠️ Verification: Expected ${teamMembersToSave.length} members, but ${savedCount} were saved`)
+        }
+      }
+      
       return true
     } catch (error) {
       console.error('❌ Error saving team members:', error)
+      console.error('❌ Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        url: error.config?.url
+      })
       return false
     }
   }
+
+  // Load weekly schedule from backend
+  const loadScheduleFromBackend = async () => {
+    if (!currentUser || !currentUser.email) {
+      console.log('⚠️ Cannot load schedule: user not logged in')
+      setWeeklySchedule({})
+      return false
+    }
+    
+    try {
+      console.log('📡 Loading schedule from backend for user:', currentUser.email)
+      console.log('   This ensures Device B sees schedule saved by Device A')
+      const response = await axios.get(`${API_BASE_URL}/schedule`, {
+        params: {
+          userEmail: currentUser.email
+        }
+      })
+      console.log('✅ Schedule loaded for user:', currentUser.email)
+      if (response.data && typeof response.data === 'object') {
+        setWeeklySchedule(response.data)
+        localStorage.setItem('pos_weekly_schedule', JSON.stringify(response.data))
+        console.log('✅ Schedule state and localStorage updated with backend data')
+        return true
+      }
+      setWeeklySchedule({})
+      localStorage.setItem('pos_weekly_schedule', JSON.stringify({}))
+      return false
+    } catch (error) {
+      console.error('❌ Error loading schedule:', error)
+      return false
+    }
+  }
+
+  // Save weekly schedule to backend
+  const saveScheduleToBackend = async (scheduleToSave) => {
+    if (!currentUser || !currentUser.email) {
+      console.log('⚠️ Cannot save schedule: user not logged in')
+      return false
+    }
+    
+    if (!scheduleToSave || typeof scheduleToSave !== 'object') {
+      console.log('⚠️ Cannot save schedule: invalid data')
+      return false
+    }
+    
+    try {
+      console.log('💾 Saving schedule to backend for user:', currentUser.email)
+      await axios.post(`${API_BASE_URL}/schedule`, {
+        userEmail: currentUser.email,
+        schedule: scheduleToSave
+      })
+      console.log('✅ Schedule saved successfully for user:', currentUser.email)
+      return true
+    } catch (error) {
+      console.error('❌ Error saving schedule:', error)
+      return false
+    }
+  }
+
+  // Load timesheet entries from backend
+  const loadTimesheetsFromBackend = async () => {
+    if (!currentUser || !currentUser.email) {
+      console.log('⚠️ Cannot load timesheets: user not logged in')
+      setTimesheetEntries({})
+      return false
+    }
+    
+    try {
+      console.log('📡 Loading timesheets from backend for user:', currentUser.email)
+      console.log('   This ensures Device B sees timesheets saved by Device A')
+      const response = await axios.get(`${API_BASE_URL}/timesheets`, {
+        params: {
+          userEmail: currentUser.email
+        }
+      })
+      console.log('✅ Timesheets loaded for user:', currentUser.email)
+      if (response.data && typeof response.data === 'object') {
+        setTimesheetEntries(response.data)
+        localStorage.setItem('pos_timesheet_entries', JSON.stringify(response.data))
+        console.log('✅ Timesheets state and localStorage updated with backend data')
+        return true
+      }
+      setTimesheetEntries({})
+      localStorage.setItem('pos_timesheet_entries', JSON.stringify({}))
+      return false
+    } catch (error) {
+      console.error('❌ Error loading timesheets:', error)
+      return false
+    }
+  }
+
+  // Save timesheet entries to backend
+  const saveTimesheetsToBackend = async (timesheetsToSave) => {
+    if (!currentUser || !currentUser.email) {
+      console.log('⚠️ Cannot save timesheets: user not logged in')
+      return false
+    }
+    
+    if (!timesheetsToSave || typeof timesheetsToSave !== 'object') {
+      console.log('⚠️ Cannot save timesheets: invalid data')
+      return false
+    }
+    
+    try {
+      console.log('💾 Saving timesheets to backend for user:', currentUser.email)
+      await axios.post(`${API_BASE_URL}/timesheets`, {
+        userEmail: currentUser.email,
+        timesheets: timesheetsToSave
+      })
+      console.log('✅ Timesheets saved successfully for user:', currentUser.email)
+      return true
+    } catch (error) {
+      console.error('❌ Error saving timesheets:', error)
+      return false
+    }
+  }
+
+  // Load payroll info from backend
+  const loadPayrollFromBackend = async () => {
+    if (!currentUser || !currentUser.email) {
+      console.log('⚠️ Cannot load payroll: user not logged in')
+      setPayrollInfo({})
+      return false
+    }
+    
+    try {
+      console.log('📡 Loading payroll from backend for user:', currentUser.email)
+      console.log('   This ensures Device B sees payroll saved by Device A')
+      const response = await axios.get(`${API_BASE_URL}/payroll`, {
+        params: {
+          userEmail: currentUser.email
+        }
+      })
+      console.log('✅ Payroll loaded for user:', currentUser.email)
+      if (response.data && typeof response.data === 'object') {
+        setPayrollInfo(response.data)
+        localStorage.setItem('pos_payroll_info', JSON.stringify(response.data))
+        console.log('✅ Payroll state and localStorage updated with backend data')
+        return true
+      }
+      setPayrollInfo({})
+      localStorage.setItem('pos_payroll_info', JSON.stringify({}))
+      return false
+    } catch (error) {
+      console.error('❌ Error loading payroll:', error)
+      return false
+    }
+  }
+
+  // Save payroll info to backend
+  const savePayrollToBackend = async (payrollToSave) => {
+    if (!currentUser || !currentUser.email) {
+      console.log('⚠️ Cannot save payroll: user not logged in')
+      return false
+    }
+    
+    if (!payrollToSave || typeof payrollToSave !== 'object') {
+      console.log('⚠️ Cannot save payroll: invalid data')
+      return false
+    }
+    
+    try {
+      console.log('💾 Saving payroll to backend for user:', currentUser.email)
+      await axios.post(`${API_BASE_URL}/payroll`, {
+        userEmail: currentUser.email,
+        payroll: payrollToSave
+      })
+      console.log('✅ Payroll saved successfully for user:', currentUser.email)
+      return true
+    } catch (error) {
+      console.error('❌ Error saving payroll:', error)
+      return false
+    }
+  }
+
+  // Load user data from backend when user is already logged in on mount
+  // This ensures device B sees data saved by device A (team members, products, etc.)
+  useEffect(() => {
+    const loadUserDataOnMount = async () => {
+      if (currentUser && currentUser.email) {
+        try {
+          // Verify user still exists and get latest subscription status
+          const response = await axios.get(`${API_BASE_URL}/auth/user`, {
+            params: { email: currentUser.email }
+          })
+          
+          if (response.data && response.data.subscriptionStatus === 'active') {
+            // User is valid and active - load all data from backend (source of truth)
+            // This is critical for multi-device sync: device B must load what device A saved
+            console.log('🔄 Loading user data from backend on mount for:', currentUser.email)
+            console.log('   This ensures device B sees data saved by device A')
+            await Promise.all([
+              reloadProductsFromBackend(),
+              loadCategoriesFromBackend(),
+              loadTeamMembersFromBackend(), // CRITICAL: Load team members from backend
+              loadTransactionsFromBackend(),
+              loadScheduleFromBackend(), // CRITICAL: Load schedule from backend
+              loadTimesheetsFromBackend(), // CRITICAL: Load timesheets from backend
+              loadPayrollFromBackend(), // CRITICAL: Load payroll from backend
+              loadTosStatusFromBackend() // CRITICAL: Load TOS agreement status from backend
+            ])
+            console.log('✅ User data loaded from backend on mount')
+          }
+        } catch (error) {
+          // If user verification fails, data loading will be handled by login flow
+          console.log('⚠️ Could not verify user on mount, skipping data load:', error.message)
+        }
+      }
+    }
+    
+    // Small delay to ensure currentUser state is set from localStorage first
+    // and all functions are defined
+    const timeoutId = setTimeout(() => {
+      loadUserDataOnMount()
+    }, 200)
+
+    return () => clearTimeout(timeoutId)
+  }, []) // Run once on mount, after currentUser is initialized and functions are defined
+
+  // CRITICAL: Refresh data from backend when navigating to Settings sections
+  // This ensures Device B always sees the latest data saved by Device A
+  useEffect(() => {
+    if (activeSettingsSection && currentUser && currentUser.email) {
+      if (activeSettingsSection === 'Terms and Conditions') {
+        console.log('🔄 Terms and Conditions section opened - refreshing TOS status from backend')
+        loadTosStatusFromBackend().catch(error => {
+          console.error('❌ Error loading TOS status:', error)
+        })
+      } else if (activeSettingsSection === 'Team members') {
+        console.log('🔄 Team members section opened - refreshing from backend to sync with other devices')
+        loadTeamMembersFromBackend().catch(error => {
+          console.error('❌ Error refreshing team members when opening section:', error)
+        })
+      } else if (activeSettingsSection === 'Schedule') {
+        console.log('🔄 Schedule section opened - refreshing from backend to sync with other devices')
+        loadScheduleFromBackend().catch(error => {
+          console.error('❌ Error refreshing schedule when opening section:', error)
+        })
+      } else if (activeSettingsSection === 'Edit time-sheets') {
+        console.log('🔄 Edit time-sheets section opened - refreshing from backend to sync with other devices')
+        loadTimesheetsFromBackend().catch(error => {
+          console.error('❌ Error refreshing timesheets when opening section:', error)
+        })
+      } else if (activeSettingsSection === 'Payroll') {
+        console.log('🔄 Payroll section opened - refreshing from backend to sync with other devices')
+        loadPayrollFromBackend().catch(error => {
+          console.error('❌ Error refreshing payroll when opening section:', error)
+        })
+      }
+    }
+  }, [activeSettingsSection, currentUser]) // Refresh whenever Settings section is opened
 
   const handleLogout = async () => {
     // Save all data before logout
@@ -3600,8 +4250,11 @@ function App() {
     localStorage.removeItem('pos_settings')
     localStorage.removeItem('pos_authenticated_employees')
     
-    // Clear all state
+    // Clear currentUser FIRST to prevent auto-save useEffect from triggering
+    // This prevents the auto-save from overwriting the logout save with empty arrays
     setCurrentUser(null)
+    
+    // Clear all state (after currentUser is cleared)
     setIsLogoutModalOpen(false)
     setTransactions([])
     setProducts([])
@@ -3650,13 +4303,14 @@ function App() {
         setOrderType(null)
         setSelectedCategory('All')
         
-        // Clear localStorage
+        // Clear localStorage (we'll reload from backend immediately after - backend is source of truth)
         localStorage.removeItem(STORAGE_KEYS.PRODUCTS)
         localStorage.removeItem(STORAGE_KEYS.CATEGORIES)
         localStorage.removeItem(STORAGE_KEYS.TEAM_MEMBERS)
         localStorage.removeItem(STORAGE_KEYS.CART)
         localStorage.removeItem(STORAGE_KEYS.ORDER_TYPE)
         localStorage.removeItem(STORAGE_KEYS.SELECTED_CATEGORY)
+        localStorage.removeItem('pos_settings') // Clear settings to prevent data mixing between accounts
         
         setCurrentUser(response.data.user)
         localStorage.setItem('pos_current_user', JSON.stringify(response.data.user))
@@ -3681,23 +4335,51 @@ function App() {
           })
           
           if (settingsResponse.data) {
-            // Merge loaded settings with current settings, preserving any local changes
-            setSettings(prev => ({
-              ...prev,
+            // Define default values for all settings fields
+            const defaultSettings = {
+              ownerName: '',
+              managerName: '',
+              businessName: '',
+              businessAddress: '',
+              ownerEmail: '',
+              ownerPhone: '',
+              managerEmail: '',
+              managerPhone: '',
+              accountEmail: response.data.user.email,
+              accountPassword: '',
+              accountEmailLastEdited: null,
+              accountPasswordLastEdited: null,
+              cardholderName: '',
+              cardNumber: '',
+              cardExpiry: '',
+              cardCVC: '',
+              country: '',
+              state: '',
+              date: new Date().toISOString().split('T')[0],
+              time: new Date().toTimeString().slice(0, 5)
+            }
+            
+            // Merge: backend data takes priority, then defaults for missing fields
+            const mergedSettings = {
+              ...defaultSettings,
               ...settingsResponse.data,
-              accountEmail: response.data.user.email
-            }))
-            // Save to localStorage
-            localStorage.setItem('pos_settings', JSON.stringify({
-              ...settingsResponse.data,
-              accountEmail: response.data.user.email
-            }))
+              accountEmail: response.data.user.email // Always use current user's email
+            }
+            
+            // Update state with merged settings (backend data prioritized)
+            setSettings(mergedSettings)
+            
+            // Save to localStorage for offline access
+            localStorage.setItem('pos_settings', JSON.stringify(mergedSettings))
+            
+            console.log('✅ Loaded settings from backend on login for:', response.data.user.email)
           } else {
-            // No settings found, just update email
+            // No settings found, just update email and keep current settings
             setSettings(prev => ({
               ...prev,
               accountEmail: response.data.user.email
             }))
+            console.log('ℹ️ No settings found in backend on login for:', response.data.user.email)
           }
         } catch (settingsError) {
           console.error('Error loading user settings:', settingsError)
@@ -3713,7 +4395,11 @@ function App() {
           reloadProductsFromBackend(),
           loadCategoriesFromBackend(),
           loadTeamMembersFromBackend(),
-          loadTransactionsFromBackend()
+          loadTransactionsFromBackend(),
+          loadScheduleFromBackend(),
+          loadTimesheetsFromBackend(),
+          loadPayrollFromBackend(),
+          loadTosStatusFromBackend() // Load TOS agreement status from backend
         ])
         
         setIsLoginModalOpen(false)
@@ -3779,13 +4465,14 @@ function App() {
         setOrderType(null)
         setSelectedCategory('All')
         
-        // Clear localStorage
+        // Clear localStorage (we'll reload from backend immediately after - backend is source of truth)
         localStorage.removeItem(STORAGE_KEYS.PRODUCTS)
         localStorage.removeItem(STORAGE_KEYS.CATEGORIES)
         localStorage.removeItem(STORAGE_KEYS.TEAM_MEMBERS)
         localStorage.removeItem(STORAGE_KEYS.CART)
         localStorage.removeItem(STORAGE_KEYS.ORDER_TYPE)
         localStorage.removeItem(STORAGE_KEYS.SELECTED_CATEGORY)
+        localStorage.removeItem('pos_settings') // Clear settings to prevent data mixing between accounts
         
         setCurrentUser(response.data.user)
         localStorage.setItem('pos_current_user', JSON.stringify(response.data.user))
@@ -3833,7 +4520,11 @@ function App() {
           reloadProductsFromBackend(), // Load products (should be empty for new user)
           loadCategoriesFromBackend(),
           loadTeamMembersFromBackend(),
-          loadTransactionsFromBackend()
+          loadTransactionsFromBackend(),
+          loadScheduleFromBackend(),
+          loadTimesheetsFromBackend(),
+          loadPayrollFromBackend(),
+          loadTosStatusFromBackend() // Load TOS agreement status from backend
         ])
         
         setIsSignupModalOpen(false)
@@ -4332,23 +5023,51 @@ function App() {
           })
           
           if (settingsResponse.data) {
-            // Merge loaded settings with current settings
-            setSettings(prev => ({
-              ...prev,
+            // Define default values for all settings fields
+            const defaultSettings = {
+              ownerName: '',
+              managerName: '',
+              businessName: '',
+              businessAddress: '',
+              ownerEmail: '',
+              ownerPhone: '',
+              managerEmail: '',
+              managerPhone: '',
+              accountEmail: currentUser.email,
+              accountPassword: '',
+              accountEmailLastEdited: null,
+              accountPasswordLastEdited: null,
+              cardholderName: '',
+              cardNumber: '',
+              cardExpiry: '',
+              cardCVC: '',
+              country: '',
+              state: '',
+              date: new Date().toISOString().split('T')[0],
+              time: new Date().toTimeString().slice(0, 5)
+            }
+            
+            // Merge: backend data takes priority, then defaults for missing fields
+            const mergedSettings = {
+              ...defaultSettings,
               ...settingsResponse.data,
-              accountEmail: currentUser.email
-            }))
-            // Save to localStorage
-            localStorage.setItem('pos_settings', JSON.stringify({
-              ...settingsResponse.data,
-              accountEmail: currentUser.email
-            }))
+              accountEmail: currentUser.email // Always use current user's email
+            }
+            
+            // Update state with merged settings (backend data prioritized)
+            setSettings(mergedSettings)
+            
+            // Save to localStorage for offline access
+            localStorage.setItem('pos_settings', JSON.stringify(mergedSettings))
+            
+            console.log('✅ Loaded settings from backend for:', currentUser.email)
           } else {
-            // No settings found, just update email
+            // No settings found in backend, just update email and keep current settings
             setSettings(prev => ({
               ...prev,
               accountEmail: currentUser.email
             }))
+            console.log('ℹ️ No settings found in backend for:', currentUser.email)
           }
         } catch (error) {
           console.error('Error loading user settings:', error)
@@ -4361,6 +5080,13 @@ function App() {
       }
       
       loadUserSettings()
+    } else {
+      // User logged out - clear settings or keep local defaults
+      // Don't clear settings completely, just remove account-specific data
+      setSettings(prev => ({
+        ...prev,
+        accountEmail: ''
+      }))
     }
   }, [currentUser])
 
@@ -5834,6 +6560,9 @@ function App() {
                 display: 'flex',
                 gap: '0.5rem'
               }}>
+                <label htmlFor="discount-code" style={{ position: 'absolute', left: '-9999px', width: '1px', height: '1px', overflow: 'hidden' }}>
+                  Discount Code
+                </label>
                 <input
                   type="text"
                   id="discount-code"
@@ -6512,6 +7241,9 @@ function App() {
                       <circle cx="11" cy="11" r="8"></circle>
                       <path d="m21 21-4.35-4.35"></path>
                     </svg>
+                    <label htmlFor="transaction-search" style={{ position: 'absolute', left: '-9999px', width: '1px', height: '1px', overflow: 'hidden' }}>
+                      Search Transactions
+                    </label>
                     <input
                       type="text"
                       id="transaction-search"
@@ -7416,6 +8148,7 @@ function App() {
                         handleSettingsSectionChange('Account');
                       }
                     }}
+                    type="button"
                     disabled={activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
                     style={activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                   >
@@ -7520,6 +8253,25 @@ function App() {
                     <span>Compliance</span>
                   </button>
                   <button
+                    className={`settings-sidebar-btn ${activeSettingsSection === 'inventory' ? 'active' : ''}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!(activeSettingsSection === 'Terms and Conditions' && !tosAgreed)) {
+                        handleSettingsSectionChange('inventory');
+                      }
+                    }}
+                    disabled={activeSettingsSection === 'Terms and Conditions' && !tosAgreed}
+                    style={activeSettingsSection === 'Terms and Conditions' && !tosAgreed ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M20 7h-4V4c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v3H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2z"></path>
+                      <path d="M12 11v6"></path>
+                      <path d="M9 14h6"></path>
+                    </svg>
+                    <span>inventory</span>
+                  </button>
+                  <button
                     ref={settingsLastItemRef}
                     className={`settings-sidebar-btn ${activeSettingsSection === 'Terms and Conditions' ? 'active' : ''}`}
                     onClick={(e) => {
@@ -7548,7 +8300,31 @@ function App() {
                 {activeSettingsSection === 'Account' && (
                 <button
                   className={`settings-edit-all-btn ${isEditingSettings ? 'active' : ''}`}
-                  onClick={() => setIsEditingSettings(!isEditingSettings)}
+                  onClick={async () => {
+                    const wasEditing = isEditingSettings
+                    setIsEditingSettings(!isEditingSettings)
+                    
+                    // If we're locking (was editing, now not editing), save immediately
+                    if (wasEditing && currentUser && currentUser.email) {
+                      // Clear any pending debounced save
+                      if (saveTimeoutRef.current) {
+                        clearTimeout(saveTimeoutRef.current)
+                        saveTimeoutRef.current = null
+                      }
+                      
+                      // Save immediately to backend
+                      try {
+                        await axios.post(`${API_BASE_URL}/user/settings`, {
+                          email: currentUser.email,
+                          settings: settings
+                        })
+                        console.log('✅ Settings saved to backend (immediate save on lock)')
+                      } catch (error) {
+                        console.error('Error saving settings to backend:', error)
+                        // Don't show error to user, just log it
+                      }
+                    }
+                  }}
                   type="button"
                   aria-label={isEditingSettings ? 'Cancel editing' : 'Edit settings'}
                 >
@@ -7874,11 +8650,15 @@ function App() {
                             name="owner-phone"
                             autoComplete="tel"
                             value={settings.ownerPhone}
-                            onChange={(e) => setSettings({ ...settings, ownerPhone: e.target.value })}
+                            onChange={(e) => {
+                              const formatted = formatPhoneNumber(e.target.value)
+                              setSettings({ ...settings, ownerPhone: formatted })
+                            }}
                             disabled={!isEditingSettings}
-                            placeholder="Enter owner phone"
+                            placeholder="000-000-0000"
                             className="settings-input"
                             style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '0.95rem', boxSizing: 'border-box' }}
+                            maxLength={12}
                           />
                           <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
                             {isEditingSettings ? (
@@ -8045,11 +8825,15 @@ function App() {
                             name="manager-phone"
                             autoComplete="tel"
                             value={settings.managerPhone}
-                            onChange={(e) => setSettings({ ...settings, managerPhone: e.target.value })}
+                            onChange={(e) => {
+                              const formatted = formatPhoneNumber(e.target.value)
+                              setSettings({ ...settings, managerPhone: formatted })
+                            }}
                             disabled={!isEditingSettings}
-                            placeholder="Enter manager phone"
+                            placeholder="000-000-0000"
                             className="settings-input"
                             style={{ width: '100%', padding: '1rem 2.75rem 1rem 1.25rem', fontSize: '0.95rem', boxSizing: 'border-box' }}
+                            maxLength={12}
                           />
                           <div className={`settings-lock-icon ${isEditingSettings ? 'unlocked' : 'locked'}`}>
                             {isEditingSettings ? (
@@ -8184,8 +8968,8 @@ function App() {
                             autoComplete="off"
                             value={settings.date}
                             onChange={(e) => {
-                              setSettings({ ...settings, date: e.target.value })
-                              setLastManualDateTimeEdit(Date.now())
+                              setSettings({ ...settings, date: e.target.value });
+                              setLastManualDateTimeEdit(Date.now());
                             }}
                             disabled={!isEditingSettings}
                             className="settings-input"
@@ -8218,8 +9002,8 @@ function App() {
                             autoComplete="off"
                             value={settings.time}
                             onChange={(e) => {
-                              setSettings({ ...settings, time: e.target.value })
-                              setLastManualDateTimeEdit(Date.now())
+                              setSettings({ ...settings, time: e.target.value });
+                              setLastManualDateTimeEdit(Date.now());
                             }}
                             disabled={!isEditingSettings}
                             className="settings-input"
@@ -8384,13 +9168,30 @@ function App() {
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', flexShrink: 0, minWidth: '105px', justifyContent: 'center' }}>
                                     <button
-                                      onClick={() => {
-                                        if (editingEmployee.name && editingEmployee.age && editingEmployee.contact && editingEmployee.email && editingEmployee.emergencyContact && editingEmployee.password) {
-                                          setTeamMembers(teamMembers.map(emp => 
+                                      onClick={async () => {
+                                        if (editingEmployee.name && editingEmployee.age && editingEmployee.contact && editingEmployee.email && editingEmployee.emergencyContact && editingEmployee.hourlyPay && editingEmployee.password) {
+                                          const updatedTeamMembers = teamMembers.map(emp => 
                                             emp.id === employee.id 
                                               ? { ...emp, ...editingEmployee }
                                               : emp
-                                          ))
+                                          )
+                                          setTeamMembers(updatedTeamMembers)
+                                          // Immediately save to backend and await to ensure it completes
+                                          if (currentUser && currentUser.email) {
+                                            try {
+                                              justSavedTeamMembersRef.current = true // Prevent auto-save from running
+                                              const saved = await saveTeamMembersToBackend(updatedTeamMembers)
+                                              if (saved) {
+                                                console.log('✅ Employee updated and saved to backend successfully')
+                                              } else {
+                                                console.warn('⚠️ Employee updated locally but save returned false')
+                                              }
+                                            } catch (error) {
+                                              console.error('❌ Error saving team member edit to backend:', error)
+                                              alert('Employee updated locally but failed to save to server. Please check your connection.')
+                                              justSavedTeamMembersRef.current = false // Reset on error
+                                            }
+                                          }
                                           setEditingEmployeeId(null)
                                           setEditingEmployee({ name: '', age: '', contact: '', email: '', emergencyContact: '', hourlyPay: '', password: '' })
                                         } else {
@@ -8637,7 +9438,7 @@ function App() {
                         </div>
                       </div>
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           if (newEmployee.name && newEmployee.age && newEmployee.contact && newEmployee.email && newEmployee.emergencyContact && newEmployee.hourlyPay && newEmployee.password) {
                             const employee = {
                               id: Date.now(),
@@ -8649,7 +9450,35 @@ function App() {
                               hourlyPay: newEmployee.hourlyPay,
                               password: newEmployee.password
                             }
-                            setTeamMembers([...teamMembers, employee])
+                            console.log('📝 Creating new employee with all fields:', {
+                              id: employee.id,
+                              name: employee.name,
+                              age: employee.age,
+                              contact: employee.contact,
+                              email: employee.email,
+                              emergencyContact: employee.emergencyContact,
+                              hourlyPay: employee.hourlyPay,
+                              password: employee.password ? '***HIDDEN***' : undefined,
+                              allKeys: Object.keys(employee)
+                            })
+                            const updatedTeamMembers = [...teamMembers, employee]
+                            setTeamMembers(updatedTeamMembers)
+                            // Immediately save to backend and await to ensure it completes
+                            if (currentUser && currentUser.email) {
+                              try {
+                                justSavedTeamMembersRef.current = true // Prevent auto-save from running
+                                const saved = await saveTeamMembersToBackend(updatedTeamMembers)
+                                if (saved) {
+                                  console.log('✅ Employee added and saved to backend successfully')
+                                } else {
+                                  console.warn('⚠️ Employee added locally but save returned false')
+                                }
+                              } catch (error) {
+                                console.error('❌ Error saving team member to backend:', error)
+                                alert('Employee added locally but failed to save to server. Please check your connection.')
+                                justSavedTeamMembersRef.current = false // Reset on error
+                              }
+                            }
                             setNewEmployee({ name: '', age: '', contact: '', email: '', emergencyContact: '', hourlyPay: '', password: '' })
                           } else {
                             alert('Please fill in all fields')
@@ -9588,6 +10417,12 @@ function App() {
                   </div>
                   )}
                   
+                  {activeSettingsSection === 'inventory' && (
+                  <div className="settings-form" style={{ height: '100%', display: 'flex', flexDirection: 'column', maxWidth: '1600px', width: '100%', padding: '0' }}>
+                    <InventoryRoutes userEmail={currentUser?.email} />
+                  </div>
+                  )}
+                  
                   {activeSettingsSection === 'Terms and Conditions' && (
                   <div className="tos-view" style={{ 
                     display: 'flex', 
@@ -9869,43 +10704,69 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                       backgroundColor: '#f8f9fa'
                     }}>
                       <button
-                        onClick={() => {
-                          if (tosScrolledToBottom) {
-                            setTosAgreed(true)
-                            localStorage.setItem('pos_tos_agreed', 'true')
-                            // After agreeing, allow navigation
-                            setActiveSettingsSection('Account')
-                          }
-                        }}
-                        disabled={!tosScrolledToBottom}
+                          onClick={async () => {
+                            // Prevent re-agreement if already agreed
+                            if (tosAgreed) {
+                              return
+                            }
+                            
+                            if (tosScrolledToBottom) {
+                              setTosAgreed(true)
+                              localStorage.setItem('pos_tos_agreed', 'true')
+                              
+                              // Save TOS agreement to backend
+                              if (currentUser && currentUser.email) {
+                                try {
+                                  const response = await axios.post(`${API_BASE_URL}/user/tos-agree`, {
+                                    email: currentUser.email
+                                  })
+                                  console.log('✅ TOS agreement saved to backend:', response.data)
+                                  
+                                  // Verify it was saved by reloading status
+                                  await loadTosStatusFromBackend()
+                                } catch (error) {
+                                  console.error('❌ Error saving TOS agreement to backend:', error)
+                                  // Revert state if backend save fails
+                                  setTosAgreed(false)
+                                  localStorage.setItem('pos_tos_agreed', 'false')
+                                  alert('Failed to save TOS agreement. Please try again.')
+                                  return
+                                }
+                              }
+                              
+                              // After agreeing, allow navigation
+                              setActiveSettingsSection('Account')
+                            }
+                          }}
+                        disabled={tosAgreed || !tosScrolledToBottom}
                         style={{
                           padding: '0.75rem 3rem',
                           fontSize: '1.1rem',
                           fontWeight: '700',
-                          backgroundColor: tosScrolledToBottom ? '#1e3a5f' : '#cccccc',
-                          color: tosScrolledToBottom ? 'white' : '#888888',
+                          backgroundColor: tosAgreed ? '#48bb78' : (tosScrolledToBottom ? '#1e3a5f' : '#cccccc'),
+                          color: tosAgreed ? 'white' : (tosScrolledToBottom ? 'white' : '#888888'),
                           border: 'none',
                           borderRadius: '8px',
-                          cursor: tosScrolledToBottom ? 'pointer' : 'not-allowed',
+                          cursor: (tosAgreed || !tosScrolledToBottom) ? 'not-allowed' : 'pointer',
                           transition: 'all 0.2s',
-                          boxShadow: tosScrolledToBottom ? '0 4px 8px rgba(30, 58, 95, 0.3)' : 'none'
+                          boxShadow: (tosAgreed || tosScrolledToBottom) ? '0 4px 8px rgba(30, 58, 95, 0.3)' : 'none'
                         }}
                         onMouseEnter={(e) => {
-                          if (tosScrolledToBottom) {
+                          if (!tosAgreed && tosScrolledToBottom) {
                             e.target.style.backgroundColor = '#2a4f7a'
                             e.target.style.transform = 'translateY(-2px)'
                             e.target.style.boxShadow = '0 6px 12px rgba(30, 58, 95, 0.4)'
                           }
                         }}
                         onMouseLeave={(e) => {
-                          if (tosScrolledToBottom) {
+                          if (!tosAgreed && tosScrolledToBottom) {
                             e.target.style.backgroundColor = '#1e3a5f'
                             e.target.style.transform = 'translateY(0)'
                             e.target.style.boxShadow = '0 4px 8px rgba(30, 58, 95, 0.3)'
                           }
                         }}
                       >
-                        {tosScrolledToBottom ? 'I Agree' : 'Please scroll to the bottom to agree'}
+                        {tosAgreed ? '✅ Agreed' : (tosScrolledToBottom ? 'I Agree' : 'Please scroll to the bottom to agree')}
                       </button>
                     </div>
                   </div>
@@ -11401,7 +12262,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                   onChange={(e) => setCustomerName(e.target.value)}
                   placeholder="Enter first name and last name or initial (e.g., Lisa L or Lisa Smith)"
                   className="form-input"
-                  autoFocus
+                  autoFocus={true}
                 />
               </div>
               
@@ -11753,8 +12614,25 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  setTeamMembers(teamMembers.filter(emp => emp.id !== employeeToRemove.id))
+                onClick={async () => {
+                  const updatedTeamMembers = teamMembers.filter(emp => emp.id !== employeeToRemove.id)
+                  setTeamMembers(updatedTeamMembers)
+                  // Immediately save to backend and await to ensure it completes
+                  if (currentUser && currentUser.email) {
+                    try {
+                      justSavedTeamMembersRef.current = true // Prevent auto-save from running
+                      const saved = await saveTeamMembersToBackend(updatedTeamMembers)
+                      if (saved) {
+                        console.log('✅ Employee removed and saved to backend successfully')
+                      } else {
+                        console.warn('⚠️ Employee removed locally but save returned false')
+                      }
+                    } catch (error) {
+                      console.error('❌ Error saving team member removal to backend:', error)
+                      alert('Employee removed locally but failed to save to server. Please check your connection.')
+                      justSavedTeamMembersRef.current = false // Reset on error
+                    }
+                  }
                   setIsRemoveEmployeeModalOpen(false)
                   setEmployeeToRemove(null)
                 }}
@@ -12394,7 +13272,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                 <input
                   id="menu-file-input"
                   type="file"
-                  accept="image/*,.pdf"
+                  accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf"
                   onChange={handleFileInput}
                   style={{ display: 'none' }}
                   disabled={isImporting}
@@ -12587,6 +13465,8 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
 
 // Export the App component
 export default App
+
+
 
 
 
