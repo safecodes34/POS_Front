@@ -504,6 +504,33 @@ export const inventoryApi = {
       params: { userEmail }
     });
     return response.data;
+  },
+
+  // Invoice Import
+  importInvoice: async (file, userEmail) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await axios.post(`${API_BASE_URL}/invoices/import`, formData, {
+      params: { userEmail },
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return response.data;
+  },
+
+  getInvoiceImportStatus: async (jobId, userEmail) => {
+    const response = await axios.get(`${API_BASE_URL}/invoices/import/${jobId}`, {
+      params: { userEmail }
+    });
+    return response.data;
+  },
+
+  resolveInvoiceImport: async (jobId, resolutions, userEmail) => {
+    const response = await axios.post(`${API_BASE_URL}/invoices/import/${jobId}/resolve`, {
+      resolutions
+    }, {
+      params: { userEmail }
+    });
+    return response.data;
   }
 };
 

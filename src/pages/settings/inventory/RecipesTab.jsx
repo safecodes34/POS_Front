@@ -13,6 +13,18 @@ export default function RecipesTab({ userEmail }) {
     if (userEmail) {
       loadRecipes();
     }
+    
+    // Listen for inventory updates (e.g., from menu import)
+    const handleItemsUpdated = () => {
+      console.log('🔄 Inventory recipes updated, refreshing...');
+      loadRecipes();
+    };
+    
+    window.addEventListener('inventory:items-updated', handleItemsUpdated);
+    
+    return () => {
+      window.removeEventListener('inventory:items-updated', handleItemsUpdated);
+    };
   }, [userEmail]);
 
   const loadRecipes = async () => {
@@ -88,4 +100,6 @@ export default function RecipesTab({ userEmail }) {
     </div>
   );
 }
+
+
 

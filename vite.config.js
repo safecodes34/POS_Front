@@ -17,6 +17,12 @@ export default defineConfig({
         cert: fs.readFileSync(path.resolve(__dirname, '../ssl/server.crt')),
       },
     } : {}),
+    hmr: {
+      // Increase timeout for large files
+      timeout: 30000,
+      // Overlay errors in browser
+      overlay: true
+    },
     headers: {
       // Allow eval in development (Vite uses it for HMR)
       // Allow Stripe scripts and API connections

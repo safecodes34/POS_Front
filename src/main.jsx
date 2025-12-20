@@ -5,6 +5,7 @@ import { loadStripe } from '@stripe/stripe-js'
 import { Elements } from '@stripe/react-stripe-js'
 import App from './App.jsx'
 import DesktopScaledFrame from './DesktopScaledFrame.jsx'
+import { CheckoutSessionProvider } from './contexts/CheckoutSessionContext'
 import './index.css'
 
 // App wrapper component to handle Stripe initialization
@@ -56,29 +57,35 @@ const AppWrapper = () => {
   if (isEmbed) {
     // Always wrap in Elements, but pass null if Stripe failed to load
     return (
-      <Elements stripe={stripePromise}>
-        {loading ? (
-          <div style={{ 
-            display: 'flex', 
-            flexDirection: 'column',
-            justifyContent: 'center', 
-            alignItems: 'center', 
-            height: '100vh',
-            gap: '1rem',
-            width: '100%'
-          }}>
-            <div>Loading...</div>
-            <div style={{ fontSize: '0.875rem', color: '#666' }}>Initializing payment system...</div>
-          </div>
-        ) : (
-          <App />
-        )}
-      </Elements>
+      <CheckoutSessionProvider>
+        <Elements stripe={stripePromise}>
+          {loading ? (
+            <div style={{ 
+              display: 'flex', 
+              flexDirection: 'column',
+              justifyContent: 'center', 
+              alignItems: 'center', 
+              height: '100vh',
+              gap: '1rem',
+              width: '100%'
+            }}>
+              <div>Loading...</div>
+              <div style={{ fontSize: '0.875rem', color: '#666' }}>Initializing payment system...</div>
+            </div>
+          ) : (
+            <App />
+          )}
+        </Elements>
+      </CheckoutSessionProvider>
     )
   }
   
   // Normal mode: wrap in DesktopScaledFrame (creates iframe with fixed viewport)
-  return <DesktopScaledFrame />
+  return (
+    <CheckoutSessionProvider>
+      <DesktopScaledFrame />
+    </CheckoutSessionProvider>
+  )
 };
 
 const rootElement = document.getElementById('root')

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { inventoryApi } from './inventoryApi';
 import InventoryErrorDisplay from './InventoryErrorDisplay';
+import InvoiceImport from './InvoiceImport';
 
 export default function ReceivingTab({ userEmail }) {
   const navigate = useNavigate();
@@ -13,6 +14,7 @@ export default function ReceivingTab({ userEmail }) {
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [formData, setFormData] = useState({ vendor_id: '', invoice_number: '', invoice_date: new Date().toISOString().split('T')[0] });
   const [bootstrapLoading, setBootstrapLoading] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   useEffect(() => {
     if (userEmail) {
@@ -109,6 +111,17 @@ export default function ReceivingTab({ userEmail }) {
     return <div style={{ textAlign: 'center', padding: '3rem' }}><div className="spinner" style={{ margin: '0 auto' }}></div><p>Loading invoices...</p></div>;
   }
 
+  const handleImportComplete = async (result) => {
+    // Refresh invoices list
+    await loadInvoices();
+    // Optionally show the imported invoice
+    if (result?.invoiceId) {
+      const fullInvoice = await inventoryApi.getInvoice(result.invoiceId, userEmail);
+      setSelectedInvoice(fullInvoice);
+    }
+    setShowImport(false);
+  };
+
   return (
     <div>
       <InventoryErrorDisplay 
@@ -118,6 +131,42 @@ export default function ReceivingTab({ userEmail }) {
       />
 
       {!isTableMissingError && (
+        <>
+          {/* Invoice Import Section */}
+          <div style={{ marginBottom: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h2 style={{ margin: 0, color: '#1e3a5f' }}>Receive Delivery</h2>
+              {!showImport && (
+                <button
+                  onClick={() => setShowImport(true)}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    backgroundColor: '#28a745',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: '600'
+                  }}
+                >
+                  Upload Invoice
+                </button>
+              )}
+            </div>
+            
+            {showImport && (
+              <div style={{ marginBottom: '2rem' }}>
+                <InvoiceImport 
+                  userEmail={userEmail} 
+                  onComplete={handleImportComplete}
+                />
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {!isTableMissingError && !showImport && (
         <>
           {invoices.length > 0 ? (
             <div style={{ overflowX: 'auto' }}>

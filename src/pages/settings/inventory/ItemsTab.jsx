@@ -32,8 +32,19 @@ export default function ItemsTab({ userEmail }) {
       setShowModal(true);
     };
     
+    // Listen for inventory updates (e.g., from menu import)
+    const handleItemsUpdated = () => {
+      console.log('🔄 Inventory items updated, refreshing...');
+      loadItems();
+    };
+    
     window.addEventListener('inventory:add-item', handleAddItem);
-    return () => window.removeEventListener('inventory:add-item', handleAddItem);
+    window.addEventListener('inventory:items-updated', handleItemsUpdated);
+    
+    return () => {
+      window.removeEventListener('inventory:add-item', handleAddItem);
+      window.removeEventListener('inventory:items-updated', handleItemsUpdated);
+    };
   }, [userEmail]);
 
   const loadItems = async () => {

@@ -104,6 +104,33 @@ if (typeof window !== 'undefined') {
   console.log('   Full URL:', window.location.href)
   console.log('═══════════════════════════════════════')
   
+  // Test backend connection on app load
+  const testBackendConnection = async () => {
+    try {
+      const healthUrl = `${BACKEND_BASE_URL}/api/health`
+      console.log('🔍 Testing backend connection to:', healthUrl)
+      const response = await axios.get(healthUrl, { timeout: 5000 })
+      console.log('✅ Backend connection successful!', response.data)
+    } catch (error) {
+      console.error('❌ Backend connection test failed!')
+      if (error.code === 'ERR_CERT_AUTHORITY_INVALID' || error.code === 'ERR_CERT_COMMON_NAME_INVALID') {
+        console.error('   🔒 SSL Certificate Error:')
+        console.error(`   👉 Visit ${BACKEND_BASE_URL}/api/health in your browser to accept the certificate`)
+        console.error('   👉 Then refresh this page')
+      } else if (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED') {
+        console.error('   🔌 Connection Error:')
+        console.error('   👉 Make sure backend is running: cd Back && npm start')
+        console.error(`   👉 Test backend directly: ${BACKEND_BASE_URL}/api/health`)
+      } else {
+        console.error('   Error:', error.message)
+        console.error(`   👉 Test backend directly: ${BACKEND_BASE_URL}/api/health`)
+      }
+    }
+  }
+  
+  // Run connection test after a short delay to not block initial render
+  setTimeout(testBackendConnection, 1000)
+  
   // Warn if using wrong backend URL
   if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
     const hostname = window.location.hostname
@@ -603,10 +630,10 @@ function App() {
   const [newCategoryName, setNewCategoryName] = useState('')
   const categoryButtonsRef = useRef(null)
   const [isCategoryScrolling, setIsCategoryScrolling] = useState(false)
-  const categoryDragStartX = useRef(0)
-  const categoryScrollStartX = useRef(0)
-  const categoryButtonClickRef = useRef(null)
-  const categoryIsDraggingRef = useRef(false)
+  const categoryIsPointerDownRef = useRef(false)
+  const categoryStartXRef = useRef(0)
+  const categoryStartScrollLeftRef = useRef(0)
+  const isDraggingRef = useRef(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [activeEditSection, setActiveEditSection] = useState('details')
   const [draggedIndex, setDraggedIndex] = useState(null)
@@ -1178,10 +1205,16 @@ function App() {
           console.error('   Health check error:', healthError.response?.status || healthError.message)
           console.error('   Error details:', healthError)
           
-          if (healthError.code === 'ERR_NETWORK' || healthError.message?.includes('Network Error')) {
+          // Check for SSL certificate errors first
+          if (healthError.code === 'ERR_CERT_AUTHORITY_INVALID' || healthError.code === 'ERR_CERT_COMMON_NAME_INVALID' || healthError.message?.includes('certificate')) {
+            console.error('   🔍 SSL Certificate Error - Browser is blocking self-signed certificate')
+            console.error('      SOLUTION: Visit this URL in your browser to accept the certificate:')
+            console.error(`      👉 ${backendUrl}/api/health`)
+            console.error('      Then refresh this page and try again.')
+          } else if (healthError.code === 'ERR_NETWORK' || healthError.message?.includes('Network Error')) {
             console.error('   🔍 Network Error - Possible causes:')
-            console.error('      1. Backend is not running')
-            console.error('      2. SSL certificate not accepted (check browser warnings)')
+            console.error('      1. Backend is not running (start with: cd Back && npm start)')
+            console.error('      2. SSL certificate not accepted - visit:', `${backendUrl}/api/health`)
             console.error('      3. Windows Firewall blocking port 4001')
             console.error('      4. Both devices not on same network')
             console.error('      5. Backend URL incorrect:', backendUrl)
@@ -1194,6 +1227,7 @@ function App() {
             console.error('      Response:', healthError.response?.data)
           }
           
+          console.warn('   💡 Quick Fix: Visit', `${backendUrl}/api/health`, 'in your browser to accept the SSL certificate')
           console.warn('   Start backend with: cd Back && npm start')
           // Don't load from localStorage - keep products empty if backend is unavailable
           setProducts([])
@@ -1242,12 +1276,23 @@ function App() {
             console.error('   4. Or use: .\\start-dev.ps1 to start both servers')
             console.error('   5. Check browser console for SSL certificate warnings')
           }
-        } else if (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED' || error.code === 'ERR_CERT_AUTHORITY_INVALID' || error.code === 'ERR_CERT_COMMON_NAME_INVALID') {
+        } else if (error.code === 'ERR_CERT_AUTHORITY_INVALID' || error.code === 'ERR_CERT_COMMON_NAME_INVALID' || error.message?.includes('certificate')) {
+          const backendUrl = BACKEND_BASE_URL
+          console.error('❌ SSL Certificate Error - Browser is blocking self-signed certificate')
+          console.error('   Error code:', error.code)
+          console.error('   Error message:', error.message)
+          console.error('   SOLUTION: Visit this URL in your browser to accept the certificate:')
+          console.error(`   👉 ${backendUrl}/api/health`)
+          console.error('   Then refresh this page and try again.')
+        } else if (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED') {
+          const backendUrl = BACKEND_BASE_URL
           console.error('❌ Cannot connect to backend server')
           console.error('   Error code:', error.code)
           console.error('   Error message:', error.message)
-          console.error('   Make sure the backend is running on https://localhost:4001')
-          console.error('   If using self-signed certificates, accept the certificate warning in your browser')
+          console.error('   Backend URL:', backendUrl)
+          console.error('   Make sure:')
+          console.error('   1. Backend is running (cd Back && npm start)')
+          console.error(`   2. Visit ${backendUrl}/api/health to accept SSL certificate if needed`)
         } else {
           console.error('❌ Unexpected error:', error.code || error.message)
           console.error('   Full error:', error)
@@ -2566,6 +2611,20 @@ function App() {
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0]
+      
+      // Validate file size
+      if (file.size === 0) {
+        setImportError('File is empty. Please select a valid file.')
+        e.dataTransfer.clearData()
+        return
+      }
+      
+      if (file.size > 10 * 1024 * 1024) {
+        setImportError('File is too large. Maximum size is 10MB.')
+        e.dataTransfer.clearData()
+        return
+      }
+      
       if (isValidFile(file)) {
         setImportFile(file)
         setImportError(null)
@@ -2583,6 +2642,21 @@ function App() {
       return
     }
     
+    // Validate file size
+    if (file.size === 0) {
+      setImportError('File is empty. Please select a valid file.')
+      e.target.value = ''
+      setImportFile(null)
+      return
+    }
+    
+    if (file.size > 10 * 1024 * 1024) {
+      setImportError('File is too large. Maximum size is 10MB.')
+      e.target.value = ''
+      setImportFile(null)
+      return
+    }
+    
     if (isValidFile(file)) {
       setImportFile(file)
       setImportError(null)
@@ -2595,6 +2669,12 @@ function App() {
 
   // Process menu import with AI
   const handleMenuImport = async () => {
+    // Check if user is logged in
+    if (!currentUser?.email) {
+      setImportError('Please log in to import menus')
+      return
+    }
+    
     if (importType === 'file' && !importFile) {
       setImportError('Please select a file first')
       return
@@ -2623,68 +2703,257 @@ function App() {
       if (importType === 'file') {
         const formData = new FormData()
         formData.append('menu', importFile)
+        
+        // Add user email for merchant ID extraction
+        if (currentUser?.email) {
+          formData.append('userEmail', currentUser.email)
+        }
 
-        // Upload file to backend
-        uploadResponse = await axios.post(`${API_BASE_URL}/menu/analyze`, formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
-          },
-          onUploadProgress: (progressEvent) => {
-            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-            setImportProgress(`Uploading: ${percentCompleted}%`)
+        // Use V2 import endpoint which handles source detection and proper processing
+        // Add userEmail to query string since middleware runs before multer parses FormData
+        const importUrl = `${API_BASE_URL}/menu/import?version=v2${currentUser?.email ? `&userEmail=${encodeURIComponent(currentUser.email)}` : ''}`
+        
+        try {
+          uploadResponse = await axios.post(importUrl, formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+              ...(currentUser?.email && { 'x-merchant-id': currentUser.email })
+            },
+            onUploadProgress: (progressEvent) => {
+              const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+              setImportProgress(`Uploading: ${percentCompleted}%`)
+            },
+            timeout: 120000 // 2 minute timeout
+          })
+        } catch (error) {
+          console.error('❌ Upload error:', error)
+          const errorMessage = error.response?.data?.error || error.message || 'Network error during upload'
+          setImportError(`Upload failed: ${errorMessage}`)
+          setImportProgress(null) // Clear progress message on error
+          setIsImporting(false)
+          return
+        }
+        
+        // V2 endpoint returns immediately with batchId, need to poll for status
+        const batchId = uploadResponse.data.importBatchId
+        if (!batchId) {
+          setImportError('No batch ID received from server')
+          setIsImporting(false)
+          return
+        }
+        
+        setImportProgress('Processing menu...')
+        // Poll for status
+        let status = 'queued'
+        const pollInterval = setInterval(async () => {
+          try {
+            const statusResponse = await axios.get(`${API_BASE_URL}/menu/import/${batchId}/status`, {
+              headers: {
+                ...(currentUser?.email && { 'x-merchant-id': currentUser.email })
+              }
+            })
+            status = statusResponse.data.status
+            setImportProgress(statusResponse.data.step || status)
+            
+            if (status === 'planned') {
+              // Products are already created in the worker, just reload them
+              clearInterval(pollInterval)
+              setImportProgress('Menu imported successfully! Refreshing...')
+              
+              // Reload products and categories to show new sections and products
+              await Promise.all([
+                reloadProductsFromBackend(),
+                loadCategoriesFromBackend()
+              ])
+              
+              // Show success message
+              const counts = statusResponse.data.counts || {}
+              const productsCreated = statusResponse.data.metadata?.products_created || counts.products_created || 0
+              const categoriesCount = statusResponse.data.metadata?.categories_count || 0
+              const message = productsCreated > 0
+                ? `Successfully imported ${productsCreated} product${productsCreated !== 1 ? 's' : ''}${categoriesCount > 0 ? ` in ${categoriesCount} section${categoriesCount !== 1 ? 's' : ''}` : ''}`
+                : 'Menu imported successfully'
+              setImportProgress(message)
+              
+              setTimeout(() => {
+                setIsAutoImportModalOpen(false)
+                setImportFile(null)
+                setImportUrl('')
+                setImportProgress(null)
+                setIsImporting(false)
+              }, 3000)
+            } else if (status === 'completed') {
+              clearInterval(pollInterval)
+              setImportProgress('Menu processed successfully! Refreshing...')
+              
+              // Reload products and categories
+              await Promise.all([
+                reloadProductsFromBackend(),
+                loadCategoriesFromBackend()
+              ])
+              
+              setTimeout(() => {
+                setIsAutoImportModalOpen(false)
+                setImportFile(null)
+                setImportUrl('')
+                setImportProgress(null)
+                setIsImporting(false)
+              }, 3000)
+            } else if (status === 'failed') {
+              clearInterval(pollInterval)
+              const errorInfo = statusResponse.data.error || {}
+              let errorMessage = errorInfo.message || 'Menu import failed'
+              
+              // Provide helpful error messages for common issues
+              if (errorMessage.includes('GraphicsMagick') || errorMessage.includes('ImageMagick')) {
+                errorMessage = 'PDF conversion requires GraphicsMagick or ImageMagick to be installed on the server. Please contact support or use a text-based PDF file.'
+              } else if (errorMessage.includes('PDF')) {
+                errorMessage = `PDF processing error: ${errorMessage}. If this is a scanned PDF, it may require additional software.`
+              }
+              
+              setImportError(errorMessage)
+              setIsImporting(false)
+            }
+          } catch (error) {
+            console.error('❌ Status check error:', error)
+            clearInterval(pollInterval)
+            // Extract real error message from response
+            let errorMessage = 'Failed to check import status'
+            if (error.response?.data) {
+              // Backend returned an error response
+              const errorData = error.response.data
+              if (errorData.error) {
+                // Error object with message property
+                errorMessage = typeof errorData.error === 'string' 
+                  ? errorData.error 
+                  : (errorData.error.message || errorData.error.code || 'Import failed')
+              } else if (errorData.message) {
+                errorMessage = errorData.message
+              } else {
+                errorMessage = `Import error: ${JSON.stringify(errorData)}`
+              }
+            } else if (error.message) {
+              errorMessage = error.message
+            }
+            setImportError(errorMessage)
+            setIsImporting(false)
           }
-        })
+        }, 2000)
+        
+        // Stop polling after 5 minutes
+        setTimeout(() => {
+          clearInterval(pollInterval)
+          if (status !== 'completed' && status !== 'planned') {
+            setImportError('Import timed out after 5 minutes')
+            setIsImporting(false)
+          }
+        }, 300000)
+        
+        // Return early - polling handles the rest
+        return
       } else {
-        // Import from URL - use new import-url endpoint that does everything server-side
-        const requestUrl = `${API_BASE_URL}/menu/import-url`
+        // Import from URL - use V2 import endpoint
+        const requestUrl = `${API_BASE_URL}/menu/import?version=v2`
         console.log('📤 Sending menu URL import request to:', requestUrl)
-        console.log('📤 API_BASE_URL:', API_BASE_URL)
         console.log('📤 URL to import:', importUrl.trim())
-        console.log('📤 User email:', currentUser?.email)
         
-        setImportProgress('Analyzing menu and creating products...')
+        setImportProgress('Processing menu URL...')
         
-        // Call import-url endpoint which handles analysis, product creation, and image downloads
+        // Call V2 import endpoint with URL
         const importResponse = await axios.post(requestUrl, {
           url: importUrl.trim(),
           userEmail: currentUser?.email || ''
         }, {
           headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            ...(currentUser?.email && { 'x-merchant-id': currentUser.email })
           },
           timeout: 120000 // 2 minute timeout for URL imports
         })
         
-        console.log('✅ Menu import complete:', importResponse.data)
+        console.log('✅ Menu import started:', importResponse.data)
         
-        const result = importResponse.data
-        
-        // Show warnings if any
-        if (result.warnings && result.warnings.length > 0) {
-          console.warn('⚠️ Import warnings:', result.warnings)
-        }
-        
-        // Reload products from backend to show newly created products
-        setImportProgress('Reloading products...')
-        await reloadProductsFromBackend()
-        
-        // Update categories if new ones were created
-        if (result.categories && result.categories.length > 0) {
-          setCategories(prev => {
-            const existing = new Set(prev)
-            const newCats = result.categories.filter(c => c !== 'All' && !existing.has(c))
-            if (newCats.length > 0) {
-              return [...prev.filter(c => c !== 'All'), ...newCats, 'All']
+        // V2 endpoint returns immediately with batchId, need to poll for status
+        const batchId = importResponse.data.importBatchId
+        if (batchId) {
+          setImportProgress('Processing menu...')
+          // Poll for status
+          let status = 'queued'
+          const pollInterval = setInterval(async () => {
+            try {
+              const statusResponse = await axios.get(`${API_BASE_URL}/menu/import/${batchId}/status`, {
+                headers: {
+                  ...(currentUser?.email && { 'x-merchant-id': currentUser.email })
+                }
+              })
+              status = statusResponse.data.status
+              setImportProgress(statusResponse.data.step || status)
+              
+              if (status === 'planned' || status === 'completed') {
+                clearInterval(pollInterval)
+                setImportProgress('Menu processed successfully! Refreshing...')
+                
+                // Reload products and categories to show new sections and products
+                await Promise.all([
+                  reloadProductsFromBackend(),
+                  loadCategoriesFromBackend()
+                ])
+                
+                // Show success message with counts
+                const counts = statusResponse.data.counts || {}
+                const productsCreated = statusResponse.data.metadata?.products_created || counts.products_created || 0
+                const categoriesCount = statusResponse.data.metadata?.categories_count || 0
+                const message = productsCreated > 0
+                  ? `Successfully imported ${productsCreated} product${productsCreated !== 1 ? 's' : ''}${categoriesCount > 0 ? ` in ${categoriesCount} section${categoriesCount !== 1 ? 's' : ''}` : ''}`
+                  : 'Menu processed successfully'
+                setImportProgress(message)
+                
+                setTimeout(() => {
+                  setIsAutoImportModalOpen(false)
+                  setImportFile(null)
+                  setImportUrl('')
+                  setImportProgress(null)
+                  setIsImporting(false)
+                }, 3000)
+              } else if (status === 'failed') {
+                clearInterval(pollInterval)
+                // Extract error message from status response
+                const errorData = statusResponse.data.error
+                const errorMessage = errorData 
+                  ? (typeof errorData === 'string' ? errorData : (errorData.message || errorData.code || 'Menu import failed'))
+                  : 'Menu import failed'
+                setImportError(errorMessage)
+                setIsImporting(false)
+              }
+            } catch (error) {
+              clearInterval(pollInterval)
+              // Extract real error message from response
+              let errorMessage = 'Failed to check import status'
+              if (error.response?.data) {
+                // Backend returned an error response
+                const errorData = error.response.data
+                if (errorData.error) {
+                  // Error object with message property
+                  errorMessage = typeof errorData.error === 'string' 
+                    ? errorData.error 
+                    : (errorData.error.message || errorData.error.code || 'Import failed')
+                } else if (errorData.message) {
+                  errorMessage = errorData.message
+                } else {
+                  errorMessage = `Import error: ${JSON.stringify(errorData)}`
+                }
+              } else if (error.message) {
+                errorMessage = error.message
+              }
+              setImportError(errorMessage)
+              setIsImporting(false)
             }
-            return prev
-          })
+          }, 2000)
+          
+          // Stop polling after 5 minutes
+          setTimeout(() => clearInterval(pollInterval), 300000)
+          return
         }
-        
-        // Show success message
-        const message = result.createdCount > 0
-          ? `Successfully imported ${result.createdCount} products${result.skippedCount > 0 ? ` (${result.skippedCount} skipped)` : ''} from ${result.categories?.length || 0} categories`
-          : 'No products were imported'
-        setImportProgress(message)
         
         setTimeout(() => {
           setIsAutoImportModalOpen(false)
@@ -2698,6 +2967,15 @@ function App() {
         return
       }
 
+      // NOTE: This code path should not be reached for V2 file uploads
+      // because we start polling above and the interval handles everything.
+      // However, if we somehow reach here, we should not continue.
+      // This is legacy V1 code - V2 file uploads should have already started polling.
+      if (importType === 'file') {
+        console.warn('⚠️ Unexpected code path reached - V2 file upload should have started polling')
+        return // Exit early - polling is already handling the status checks
+      }
+      
       setImportProgress('Analyzing menu with AI...')
 
       // For file uploads, continue with existing polling logic
@@ -3603,15 +3881,16 @@ function App() {
       let errorMessage = 'Failed to save transaction. Please try again.'
       
       // Check for specific error types
-      if (error.code === 'ERR_NETWORK') {
-        errorMessage = 'Network error: Cannot connect to server. Please check:\n1. Backend server is running\n2. Backend URL is correct\n3. No firewall blocking the connection'
+      const backendUrl = BACKEND_BASE_URL
+      if (error.code === 'ERR_CERT_AUTHORITY_INVALID' || error.code === 'ERR_CERT_COMMON_NAME_INVALID' || error.message?.includes('certificate')) {
+        errorMessage = `SSL Certificate Error: Please visit ${backendUrl}/api/health in your browser first to accept the self-signed certificate, then try again.`
+        console.error('❌ SSL Certificate error - visit', `${backendUrl}/api/health`, 'to accept certificate')
+      } else if (error.code === 'ERR_NETWORK') {
+        errorMessage = `Network error: Cannot connect to server at ${backendUrl}. Please check:\n1. Backend server is running (cd Back && npm start)\n2. Visit ${backendUrl}/api/health to accept SSL certificate if needed\n3. No firewall blocking the connection`
         console.error('❌ Network error - Backend URL:', `${API_BASE_URL}/transactions`)
       } else if (error.code === 'ECONNREFUSED') {
-        errorMessage = 'Connection refused: Backend server is not running. Please start the backend server.'
+        errorMessage = `Connection refused: Backend server is not running at ${backendUrl}. Please start the backend server (cd Back && npm start).`
         console.error('❌ Connection refused - Backend URL:', `${API_BASE_URL}/transactions`)
-      } else if (error.code === 'ERR_CERT_AUTHORITY_INVALID' || error.code === 'ERR_CERT_COMMON_NAME_INVALID') {
-        errorMessage = 'SSL Certificate error: Please accept the certificate warning in your browser or check SSL configuration.'
-        console.error('❌ SSL Certificate error')
       } else if (error.response) {
         // Server responded with error status
         if (error.response.data?.error) {
@@ -4418,8 +4697,13 @@ function App() {
         code: error.code
       })
       
-      if (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED') {
-        setAuthError('Cannot connect to server. Please make sure the backend is running.')
+      // Check for SSL certificate errors first
+      if (error.code === 'ERR_CERT_AUTHORITY_INVALID' || error.code === 'ERR_CERT_COMMON_NAME_INVALID' || error.message?.includes('certificate')) {
+        const backendUrl = BACKEND_BASE_URL
+        setAuthError(`SSL Certificate Error: Please visit ${backendUrl}/api/health in your browser first to accept the self-signed certificate, then try again.`)
+      } else if (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED') {
+        const backendUrl = BACKEND_BASE_URL
+        setAuthError(`Cannot connect to server at ${backendUrl}. Please make sure: 1) Backend is running (cd Back && npm start), 2) Visit ${backendUrl}/api/health to accept SSL certificate if needed.`)
       } else if (error.response?.data?.error) {
         setAuthError(error.response.data.error)
       } else if (error.message) {
@@ -4572,10 +4856,11 @@ function App() {
       console.groupEnd()
       
       // Handle different error types with user-friendly messages
-      if (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED') {
-        setAuthError('Cannot connect to server. Please make sure the backend is running on https://localhost:4001. Start it with: cd Back && npm start')
-      } else if (error.code === 'ERR_CERT_AUTHORITY_INVALID' || error.code === 'ERR_CERT_COMMON_NAME_INVALID') {
-        setAuthError('SSL certificate error. Please visit https://localhost:4001/api/health in your browser and accept the certificate warning, then try again.')
+      const backendUrl = BACKEND_BASE_URL
+      if (error.code === 'ERR_CERT_AUTHORITY_INVALID' || error.code === 'ERR_CERT_COMMON_NAME_INVALID' || error.message?.includes('certificate')) {
+        setAuthError(`SSL Certificate Error: Please visit ${backendUrl}/api/health in your browser first to accept the self-signed certificate, then try again.`)
+      } else if (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED') {
+        setAuthError(`Cannot connect to server at ${backendUrl}. Please make sure: 1) Backend is running (cd Back && npm start), 2) Visit ${backendUrl}/api/health to accept SSL certificate if needed.`)
       } else if (error.response?.data?.error) {
         setAuthError(error.response.data.error)
       } else if (error.response?.status) {
@@ -6204,76 +6489,86 @@ function App() {
     setIngredientsText(allIngredients.join('\n'))
   }
 
-  // Drag-to-scroll handlers for category buttons
-  const categoryDragThreshold = 5 // pixels of movement before considering it a drag
+  // Drag-to-scroll handlers for category buttons (pointer event based)
+  const categoryDragThreshold = 7 // pixels of movement before considering it a drag
 
-  const handleCategoryScrollMouseDown = (e) => {
-    if (!categoryButtonsRef.current) return
+  const handleCategoryPointerDown = useCallback((e) => {
+    const container = categoryButtonsRef.current
+    if (!container) return
     
-    // Don't handle if clicking directly on a button (button's own handler will deal with it)
-    // Check if the click target is a button or inside a button
-    if (e.target.closest('.category-btn')) {
-      // Let the button's own handlers deal with it - don't interfere
-      return
-    }
+    // Only handle primary/left pointer button
+    if (e.button !== 0 && e.button !== undefined) return
     
-    // Only handle drag-to-scroll on the container itself, not on buttons
-    // Store initial values for drag-to-scroll
-    categoryDragStartX.current = e.clientX
-    categoryScrollStartX.current = categoryButtonsRef.current.scrollLeft
-    categoryIsDraggingRef.current = false
-    categoryButtonClickRef.current = null
+    categoryIsPointerDownRef.current = true
+    isDraggingRef.current = false
+    categoryStartXRef.current = e.clientX
+    categoryStartScrollLeftRef.current = container.scrollLeft
     
-    // Set up move and up handlers
-    const handleMouseMove = (moveEvent) => {
-      const deltaX = Math.abs(moveEvent.clientX - categoryDragStartX.current)
-      
-      if (deltaX > categoryDragThreshold) {
-        // This is a drag, not a click
-        if (!categoryIsDraggingRef.current) {
-          categoryIsDraggingRef.current = true
-          setIsCategoryScrolling(true)
-          categoryButtonClickRef.current = null // Cancel the click
-          document.body.style.cursor = 'grabbing'
-          document.body.style.userSelect = 'none'
-          if (categoryButtonsRef.current) {
-            categoryButtonsRef.current.style.cursor = 'grabbing'
-          }
-        }
-        
-        // Update scroll position
-        const scrollDelta = moveEvent.clientX - categoryDragStartX.current
-        if (categoryButtonsRef.current) {
-          categoryButtonsRef.current.scrollLeft = categoryScrollStartX.current - scrollDelta
-        }
-      }
-    }
+    // Do NOT call preventDefault or setPointerCapture on pointerdown
+    // Only capture pointer when we're actually dragging (after threshold)
+  }, [])
+
+  const handleCategoryPointerMove = useCallback((e) => {
+    if (!categoryIsPointerDownRef.current) return
     
-    const handleMouseUp = () => {
-      const wasDragging = categoryIsDraggingRef.current
-      
-      // Clean up dragging state
-      if (wasDragging) {
-        setIsCategoryScrolling(false)
-        document.body.style.cursor = ''
-        document.body.style.userSelect = ''
-        categoryIsDraggingRef.current = false
-        if (categoryButtonsRef.current) {
-          categoryButtonsRef.current.style.cursor = 'grab'
-        }
+    const container = categoryButtonsRef.current
+    if (!container) return
+    
+    const dx = e.clientX - categoryStartXRef.current
+    
+    // If moved past threshold, mark as dragging
+    if (Math.abs(dx) > categoryDragThreshold) {
+      if (!isDraggingRef.current) {
+        isDraggingRef.current = true
+        setIsCategoryScrolling(true)
+        container.classList.add('dragging')
+        // Only capture pointer when we're actually dragging
+        container.setPointerCapture(e.pointerId)
       }
       
-      // Don't process button clicks here - buttons now have their own onClick handlers
-      // This mouseup handler is only for drag-to-scroll functionality
-      
-      categoryButtonClickRef.current = null
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
+      // Update scroll position (invert dx for natural scroll direction)
+      container.scrollLeft = categoryStartScrollLeftRef.current - dx
+      // Only call preventDefault while dragging
+      e.preventDefault()
     }
+  }, [])
+
+  const handleCategoryPointerUp = useCallback((e) => {
+    const container = categoryButtonsRef.current
+    if (!container) return
     
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-  }
+    categoryIsPointerDownRef.current = false
+    container.classList.remove('dragging')
+    setIsCategoryScrolling(false)
+    
+    if (container.hasPointerCapture(e.pointerId)) {
+      container.releasePointerCapture(e.pointerId)
+    }
+    // Note: isDraggingRef is reset in onClickCapture after click is handled
+  }, [])
+
+  const handleCategoryPointerCancel = useCallback((e) => {
+    const container = categoryButtonsRef.current
+    if (!container) return
+    
+    categoryIsPointerDownRef.current = false
+    isDraggingRef.current = false
+    container.classList.remove('dragging')
+    setIsCategoryScrolling(false)
+    
+    if (container.hasPointerCapture(e.pointerId)) {
+      container.releasePointerCapture(e.pointerId)
+    }
+  }, [])
+
+  // Prevent click events if dragging occurred
+  const handleCategoryClickCapture = useCallback((e) => {
+    if (isDraggingRef.current) {
+      e.preventDefault()
+      e.stopPropagation()
+      isDraggingRef.current = false // Reset for next interaction
+    }
+  }, [])
 
   const handleMouseDown = (e, index) => {
     if (index === 0) return // Can't drag "All"
@@ -9404,7 +9699,7 @@ function App() {
                               const formatted = formatEmergencyContact(e.target.value)
                               setNewEmployee({ ...newEmployee, emergencyContact: formatted })
                             }}
-                            placeholder="Enter email or phone number"
+                            placeholder="Emergency contact"
                             className="settings-input"
                             style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
                           />
@@ -10842,6 +11137,33 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                 </button>
               </div>
               <div className="nav-footer-right">
+                {isMenuRoute && (
+                  <>
+                    {isEditMode && (
+                      <button 
+                        className="auto-import-menu-btn"
+                        onClick={() => setIsAutoImportModalOpen(true)}
+                      >
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                          <polyline points="17 8 12 3 7 8"></polyline>
+                          <line x1="12" y1="3" x2="12" y2="15"></line>
+                        </svg>
+                        <span>Auto Import Menu</span>
+                      </button>
+                    )}
+                    <button 
+                      className={`edit-menu-btn ${isEditMode ? 'active' : ''}`}
+                      onClick={() => setIsEditMode(!isEditMode)}
+                    >
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                      </svg>
+                      <span>Edit Product</span>
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -10861,12 +11183,11 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
               <div 
                 className={`category-buttons ${isCategoryScrolling ? 'dragging' : ''}`}
                 ref={categoryButtonsRef}
-                onMouseDown={(e) => {
-                  // Only handle drag-to-scroll if clicking on the container itself, not on buttons
-                  if (!e.target.closest('.category-btn')) {
-                    handleCategoryScrollMouseDown(e);
-                  }
-                }}
+                onPointerDown={handleCategoryPointerDown}
+                onPointerMove={handleCategoryPointerMove}
+                onPointerUp={handleCategoryPointerUp}
+                onPointerCancel={handleCategoryPointerCancel}
+                onClickCapture={handleCategoryClickCapture}
               >
                 {categories.map(category => (
                   <button
@@ -10881,11 +11202,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                       setSelectedCategory(category);
                       console.log('🔵 setSelectedCategory called with:', category);
                     }}
-                    onMouseDown={(e) => {
-                      // Stop the parent's drag handler from interfering
-                      e.stopPropagation();
-                    }}
-                    style={{ pointerEvents: 'auto', cursor: 'pointer', position: 'relative', zIndex: 100 }}
+                    style={{ cursor: 'pointer', position: 'relative', zIndex: 100 }}
                   >
                     {category}
                   </button>
@@ -10893,29 +11210,6 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
               </div>
             </div>
             <div className="header-right">
-              <button 
-                className={`edit-menu-btn ${isEditMode ? 'active' : ''}`}
-                onClick={() => setIsEditMode(!isEditMode)}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                </svg>
-                Edit Product
-              </button>
-              {isEditMode && (
-                <button 
-                  className="auto-import-menu-btn"
-                  onClick={() => setIsAutoImportModalOpen(true)}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="17 8 12 3 7 8"></polyline>
-                    <line x1="12" y1="3" x2="12" y2="15"></line>
-                  </svg>
-                  Auto Import Menu
-                </button>
-              )}
               <div className="search-bar">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="11" cy="11" r="8"></circle>
@@ -11844,7 +12138,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                     className={`order-type-btn ${orderType === 'Dine In' ? 'active' : ''}`}
                     onClick={() => setOrderType('Dine In')}
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"></path>
                       <path d="M7 2v20"></path>
                       <path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3v0"></path>
@@ -11860,7 +12154,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
                       <line x1="3" y1="6" x2="21" y2="6"></line>
-                      <path d="M16 10a4 4 0 0 1-8 0"></path>
+                      <path d="M9 12l2 2 4-4" strokeLinecap="round" strokeLinejoin="round"></path>
                     </svg>
                     Takeout
                   </button>
@@ -11869,10 +12163,10 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
 
           {cart.length === 0 ? (
             <div className="empty-cart">
-              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
-                <line x1="3" y1="6" x2="21" y2="6"></line>
-                <path d="M16 10a4 4 0 0 1-8 0"></path>
+              <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                {/* Simple bag */}
+                <path d="M5 6h14v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6z" fill="none"/>
+                <path d="M5 6l-1-2h16l-1 2" fill="none"/>
               </svg>
               <p>Cart is empty</p>
             </div>
@@ -11933,7 +12227,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
 
             <div className="payment-buttons">
             <button className="payment-btn crypto">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="2" y="6" width="20" height="12" rx="2"></rect>
                 <line x1="6" y1="10" x2="6" y2="14"></line>
                 <line x1="10" y1="10" x2="10" y2="14"></line>
@@ -11953,7 +12247,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
               }}
               disabled={!cart || cart.length === 0}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
                 <line x="1" y1="10" x2="23" y2="10"></line>
               </svg>
@@ -13290,7 +13584,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                       {importFile.name}
                     </p>
                     <p style={{ margin: '0.5rem 0', color: '#666', fontSize: '0.9rem' }}>
-                      {(importFile.size / 1024 / 1024).toFixed(2)} MB
+                      {importFile.size ? (importFile.size / 1024 / 1024).toFixed(2) + ' MB' : 'Size unknown'}
                     </p>
                     <button
                       onClick={(e) => {
@@ -13455,6 +13749,33 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
             </button>
           </div>
           <div className="nav-footer-right">
+            {isMenuRoute && (
+              <>
+                {isEditMode && (
+                  <button 
+                    className="auto-import-menu-btn"
+                    onClick={() => setIsAutoImportModalOpen(true)}
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="17 8 12 3 7 8"></polyline>
+                      <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    <span>Auto Import Menu</span>
+                  </button>
+                )}
+                <button 
+                  className={`edit-menu-btn ${isEditMode ? 'active' : ''}`}
+                  onClick={() => setIsEditMode(!isEditMode)}
+                >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                  </svg>
+                  <span>Edit Product</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

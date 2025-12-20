@@ -75,6 +75,86 @@ export default function OverviewTab({ userEmail }) {
     );
   }
 
+  // Show diagnostic message if items exist but no recipes (menu might not have been linked)
+  const hasItemsButNoRecipes = stats && stats.items > 0 && (stats.recipes === 0 || !stats.recipes);
+
+  // Empty state with guided CTAs
+  if (isEmpty && !error) {
+    return (
+      <div style={{ textAlign: 'center', padding: '4rem 2rem' }}>
+        <h2 style={{ fontSize: '1.5rem', marginBottom: '1rem', color: '#333' }}>Get Started with Inventory</h2>
+        <p style={{ color: '#666', marginBottom: '2rem', fontSize: '1.1rem' }}>
+          Start by uploading your menu or receiving your first delivery
+        </p>
+        {hasItemsButNoRecipes && (
+          <div style={{
+            backgroundColor: '#fff3cd',
+            border: '1px solid #ffc107',
+            borderRadius: '8px',
+            padding: '1rem',
+            marginBottom: '2rem',
+            textAlign: 'left',
+            maxWidth: '600px',
+            margin: '0 auto 2rem'
+          }}>
+            <strong>💡 Menu Import Detected</strong>
+            <p style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: '#856404' }}>
+              You have menu items but no recipes. If you just imported a menu, check the browser console (F12) for any errors. 
+              The menu-to-inventory linking should happen automatically. If it didn't work, try re-importing your menu.
+            </p>
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => navigate('/')}
+            style={{
+              padding: '1rem 2rem',
+              backgroundColor: '#1e3a5f',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '1rem',
+              fontWeight: '600',
+              cursor: 'pointer'
+            }}
+          >
+            📋 Upload Menu (Auto-Create Ingredients)
+          </button>
+          <button
+            onClick={() => navigate('/settings/inventory/receiving')}
+            style={{
+              padding: '1rem 2rem',
+              backgroundColor: '#28a745',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '1rem',
+              fontWeight: '600',
+              cursor: 'pointer'
+            }}
+          >
+            📦 Receive Delivery (Upload Invoice)
+          </button>
+          <button
+            onClick={() => navigate('/settings/inventory/counts')}
+            style={{
+              padding: '1rem 2rem',
+              backgroundColor: '#6c757d',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '1rem',
+              fontWeight: '600',
+              cursor: 'pointer'
+            }}
+          >
+            🔢 Start Count
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <InventoryErrorDisplay 
@@ -82,6 +162,32 @@ export default function OverviewTab({ userEmail }) {
         onRetry={loadOverview}
         onDismiss={() => setError(null)}
       />
+
+      {/* Diagnostic message if menu was imported but recipes weren't created */}
+      {hasItemsButNoRecipes && (
+        <div style={{
+          backgroundColor: '#fff3cd',
+          border: '1px solid #ffc107',
+          borderRadius: '8px',
+          padding: '1rem 1.5rem',
+          marginBottom: '2rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1rem'
+        }}>
+          <div style={{ fontSize: '1.5rem' }}>💡</div>
+          <div style={{ flex: 1 }}>
+            <strong style={{ display: 'block', marginBottom: '0.25rem', color: '#856404' }}>
+              Menu Import Detected - Recipes Not Created
+            </strong>
+            <p style={{ margin: 0, fontSize: '0.9rem', color: '#856404' }}>
+              You have {stats.items} inventory item{stats.items !== 1 ? 's' : ''} but no recipes. 
+              If you just imported a menu, the inventory linking may have failed. 
+              <strong> Check your browser console (F12)</strong> for errors, or try re-importing your menu - the fix is now in place.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Main Dashboard - Three Context Cards */}
       <div style={{ 

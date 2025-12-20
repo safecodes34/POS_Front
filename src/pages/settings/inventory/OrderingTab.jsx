@@ -38,14 +38,17 @@ export default function OrderingTab({ userEmail }) {
 
   const handleExportCSV = (vendor) => {
     const csv = [
-      ['Item', 'On-Hand', 'PAR', 'Suggested Qty', 'Pack Size', 'Rounded Qty'].join(','),
+      ['Vendor', 'Item', 'On-Hand', 'Daily Usage', 'Target Stock', 'Reorder Qty', 'Unit', 'Pack Size', 'Notes'].join(','),
       ...vendor.items.map(item => [
+        vendor.vendor_name || 'Unknown Vendor',
         item.item_name,
-        item.on_hand_qty,
-        item.par_level || '',
-        item.suggestedQty,
+        item.on_hand_qty?.toFixed(2) || 0,
+        item.avgDailyUsage?.toFixed(2) || '',
+        item.targetStock?.toFixed(2) || item.par_level || '',
+        item.suggestedQty?.toFixed(2) || 0,
+        item.base_uom,
         item.pack_size || '',
-        item.suggestedQty
+        item.reasoning?.hasUsageData ? 'Based on usage data' : 'No usage data yet'
       ].join(','))
     ].join('\n');
     
@@ -53,7 +56,7 @@ export default function OrderingTab({ userEmail }) {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${vendor.vendor_name}_order_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `${vendor.vendor_name || 'Unknown_Vendor'}_order_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
   };
 
@@ -85,17 +88,19 @@ export default function OrderingTab({ userEmail }) {
                     <tr style={{ backgroundColor: '#e9ecef', borderBottom: '2px solid #dee2e6' }}>
                       <th style={{ padding: '0.75rem', textAlign: 'left', fontWeight: '600' }}>Item</th>
                       <th style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>On-Hand</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>PAR</th>
-                      <th style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>Suggested</th>
+                      <th style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>Daily Usage</th>
+                      <th style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>Target</th>
+                      <th style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>Reorder Qty</th>
                     </tr>
                   </thead>
                   <tbody>
                     {vendor.items.map((item, idx) => (
                       <tr key={idx} style={{ borderBottom: '1px solid #dee2e6' }}>
                         <td style={{ padding: '0.75rem' }}>{item.item_name}</td>
-                        <td style={{ padding: '0.75rem', textAlign: 'right' }}>{item.on_hand_qty} {item.base_uom}</td>
-                        <td style={{ padding: '0.75rem', textAlign: 'right' }}>{item.par_level || '-'}</td>
-                        <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600' }}>{item.suggestedQty} {item.base_uom}</td>
+                        <td style={{ padding: '0.75rem', textAlign: 'right' }}>{item.on_hand_qty?.toFixed(2) || 0} {item.base_uom}</td>
+                        <td style={{ padding: '0.75rem', textAlign: 'right' }} title={item.reasoning?.hasUsageData ? 'Based on last 14 days' : 'No usage data yet'}>{item.avgDailyUsage?.toFixed(2) || '-'} {item.base_uom}/day</td>
+                        <td style={{ padding: '0.75rem', textAlign: 'right' }}>{item.targetStock?.toFixed(2) || item.par_level || '-'} {item.base_uom}</td>
+                        <td style={{ padding: '0.75rem', textAlign: 'right', fontWeight: '600', color: '#1e3a5f' }}>{item.suggestedQty?.toFixed(2) || 0} {item.base_uom}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -112,4 +117,6 @@ export default function OrderingTab({ userEmail }) {
     </div>
   );
 }
+
+
 
