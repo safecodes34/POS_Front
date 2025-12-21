@@ -9,6 +9,8 @@
 /* Global Layout - Applies to all routes */
 html, body, #root {
   height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .app-container {
@@ -33,7 +35,7 @@ html, body, #root {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
+  bottom: -1px;
   height: var(--footer-h);
   z-index: 50;
   display: flex;
@@ -46,6 +48,7 @@ html, body, #root {
   background-color: #ffffff;
   flex-wrap: wrap;
   box-sizing: border-box;
+  margin-bottom: 0;
 }
 
 /* Menu Route Only - Special layout for menu page */
@@ -416,6 +419,42 @@ html, body, #root {
 }
 
 .auto-import-menu-btn span {
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+
+.delete-all-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.75rem 1.5rem;
+  border: 2px solid #dc3545;
+  background-color: #ffffff;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  color: #dc3545;
+  font-size: 1rem;
+  font-weight: 600;
+  min-width: 100px;
+  flex: 0 1 auto;
+}
+
+.delete-all-btn:hover {
+  background-color: #dc3545;
+  border-color: #c82333;
+  color: white;
+}
+
+.delete-all-btn svg {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+}
+
+.delete-all-btn span {
   font-size: 0.95rem;
   white-space: nowrap;
 }
@@ -956,7 +995,7 @@ html, body, #root {
 .order-type-selector::after {
   content: '';
   position: absolute;
-  bottom: 6px;
+  bottom: 8px;
   left: 0;
   right: 0;
   height: 2px;
@@ -976,25 +1015,36 @@ html, body, #root {
   justify-content: center;
   gap: 0.5rem;
   padding: 0.875rem;
-  border: 1px solid #ddd;
+  border: 2px solid #ddd;
   background-color: white;
   border-radius: 8px;
   cursor: pointer;
   font-size: 1rem;
   font-weight: 600;
-  color: #222;
-  transition: all 0.2s;
+  color: #666;
+  transition: all 0.3s ease;
+  position: relative;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .order-type-btn:hover {
-  background-color: #f0f0f0;
+  background-color: #f5f5f5;
   border-color: #bbb;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
 .order-type-btn.active {
-  background-color: white;
-  color: #222;
-  border-color: #ddd;
+  background-color: #1e3a5f;
+  color: white;
+  border-color: #1e3a5f;
+  box-shadow: 0 2px 8px rgba(30, 58, 95, 0.4);
+  transform: translateY(-1px);
+}
+
+.order-type-btn.active:hover {
+  background-color: #2a4f7a;
+  border-color: #2a4f7a;
+  box-shadow: 0 3px 10px rgba(30, 58, 95, 0.5);
 }
 
 .empty-cart {
@@ -1342,14 +1392,14 @@ html, body, #root {
 }
 
 .payment-buttons .payment-btn.pay {
-  background-color: #90ee90;
-  color: #000;
+  background-color: #228B22;
+  color: white;
   border: none;
   font-weight: 600;
 }
 
 .payment-buttons .payment-btn.pay:hover:not(:disabled) {
-  background-color: #7fdf7f;
+  background-color: #1e7e1e;
 }
 
 .checkoutButtons .payment-btn.crypto {
@@ -1366,14 +1416,14 @@ html, body, #root {
 }
 
 .checkoutButtons .payment-btn.pay {
-  background-color: #00d400;
+  background-color: #006600;
   color: white;
   font-weight: 700;
   border-radius: 12px;
 }
 
 .payment-btn.pay:hover:not(:disabled) {
-  background-color: #00b300;
+  background-color: #005500;
 }
 
 .payment-btn:disabled {
@@ -1430,26 +1480,16 @@ html, body, #root {
   color: #fff;
 }
 
-/* Scrollbar styling */
+/* Hide scrollbar for products grid and cart items */
+.products-grid,
+.cart-items {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
 .products-grid::-webkit-scrollbar,
 .cart-items::-webkit-scrollbar {
-  width: 8px;
-}
-
-.products-grid::-webkit-scrollbar-track,
-.cart-items::-webkit-scrollbar-track {
-  background: #f1f1f1;
-}
-
-.products-grid::-webkit-scrollbar-thumb,
-.cart-items::-webkit-scrollbar-thumb {
-  background: #ccc;
-  border-radius: 4px;
-}
-
-.products-grid::-webkit-scrollbar-thumb:hover,
-.cart-items::-webkit-scrollbar-thumb:hover {
-  background: #aaa;
+  display: none; /* Chrome, Safari, Opera */
 }
 
 /* Hide scrollbar for transactions list but keep scrolling */
@@ -1564,22 +1604,13 @@ html, body, #root {
   flex: 1;
 }
 
+.list-section {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
 .list-section::-webkit-scrollbar {
-  width: 8px;
-}
-
-.list-section::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 4px;
-}
-
-.list-section::-webkit-scrollbar-thumb {
-  background: #ccc;
-  border-radius: 4px;
-}
-
-.list-section::-webkit-scrollbar-thumb:hover {
-  background: #aaa;
+  display: none; /* Chrome, Safari, Opera */
 }
 
 .price-input {
@@ -1672,6 +1703,8 @@ html, body, #root {
   padding: 0.75rem 1.25rem;
   margin-top: 0;
   flex-shrink: 0;
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
 }
 
 .btn-cancel-small,
@@ -2327,6 +2360,7 @@ html, body, #root {
   width: 90%;
   max-width: 550px;
   transition: max-width 0.2s ease;
+  overflow: hidden;
 }
 
 .modal-content.modal-wide {
@@ -2467,6 +2501,31 @@ html, body, #root {
 
 .modal-body::-webkit-scrollbar {
   display: none; /* Chrome, Safari, Opera */
+}
+
+/* Show scrollbar for transaction modal */
+.transaction-modal-body {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: #c0c0c0 #f5f5f5; /* Firefox */
+}
+
+.transaction-modal-body::-webkit-scrollbar {
+  display: block; /* Chrome, Safari, Opera */
+  width: 8px;
+}
+
+.transaction-modal-body::-webkit-scrollbar-track {
+  background: #f5f5f5;
+  border-radius: 4px;
+}
+
+.transaction-modal-body::-webkit-scrollbar-thumb {
+  background: #c0c0c0;
+  border-radius: 4px;
+}
+
+.transaction-modal-body::-webkit-scrollbar-thumb:hover {
+  background: #a0a0a0;
 }
 
 .category-list {
@@ -2833,6 +2892,8 @@ html, body, #root {
   background-color: #f5f5f5;
   flex-shrink: 0;
   margin-top: 0;
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
 }
 
 /* Payment Method Selection Styles */
@@ -3315,26 +3376,12 @@ html, body, #root {
 }
 
 .tos-content {
-  scrollbar-width: thin;
-  scrollbar-color: #c0c0c0 #f5f5f5;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
 }
 
 .tos-content::-webkit-scrollbar {
-  width: 10px;
-}
-
-.tos-content::-webkit-scrollbar-track {
-  background: #f5f5f5;
-  border-radius: 5px;
-}
-
-.tos-content::-webkit-scrollbar-thumb {
-  background: #c0c0c0;
-  border-radius: 5px;
-}
-
-.tos-content::-webkit-scrollbar-thumb:hover {
-  background: #999;
+  display: none; /* Chrome, Safari, Opera */
 }
 
 /* Global Responsive Scale - Shrink everything proportionally based on viewport width */

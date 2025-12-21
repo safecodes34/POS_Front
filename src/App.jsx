@@ -657,6 +657,9 @@ function App() {
   const [isRemoveEmployeeModalOpen, setIsRemoveEmployeeModalOpen] = useState(false)
   const [employeeToRemove, setEmployeeToRemove] = useState(null)
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false)
+  const [isDeleteProductModalOpen, setIsDeleteProductModalOpen] = useState(false)
+  const [productToDeleteId, setProductToDeleteId] = useState(null)
+  const [isDeleteAllModalOpen, setIsDeleteAllModalOpen] = useState(false)
   // ============================================================================
   // TEMPORARY DISABLE FLAGS - MUST BE RE-ENABLED LATER
   // ============================================================================
@@ -786,6 +789,8 @@ function App() {
   const [isProcessingStripePayment, setIsProcessingStripePayment] = useState(false)
   const [stripePaymentStatus, setStripePaymentStatus] = useState(null)
   const [lastPaymentIntentId, setLastPaymentIntentId] = useState(null)
+  const [isCashChangeModalOpen, setIsCashChangeModalOpen] = useState(false)
+  const [cashAmountReceived, setCashAmountReceived] = useState('')
   const [isAutoImportModalOpen, setIsAutoImportModalOpen] = useState(false)
   const [importFile, setImportFile] = useState(null)
   const [importUrl, setImportUrl] = useState('')
@@ -1129,6 +1134,61 @@ function App() {
     } catch (error) {
       console.error('❌ Error loading transactions:', error)
       return false
+    }
+  }
+
+  // Handle refund transaction
+  const handleRefundTransaction = async () => {
+    if (!selectedTransaction) return
+    
+    // Confirm refund action
+    const confirmRefund = window.confirm(
+      `Are you sure you want to refund this transaction?\n\n` +
+      `Customer: ${selectedTransaction.customerName}\n` +
+      `Amount: $${(selectedTransaction.total || 0).toFixed(2)}\n\n` +
+      `This action cannot be undone.`
+    )
+    
+    if (!confirmRefund) return
+    
+    if (!currentUser || !currentUser.email) {
+      alert('You must be logged in to process refunds.')
+      return
+    }
+    
+    try {
+      // Call refund endpoint
+      const response = await axios.post(
+        `${API_BASE_URL}/transactions/${selectedTransaction.id}/refund`,
+        {
+          userEmail: currentUser.email
+        },
+        {
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        }
+      )
+      
+      console.log('✅ Transaction refunded:', response.data)
+      
+      // Reload transactions to reflect the refund
+      await loadTransactionsFromBackend()
+      
+      // Close the modal
+      setSelectedTransaction(null)
+      
+      alert('Transaction refunded successfully.')
+    } catch (error) {
+      console.error('❌ Error refunding transaction:', error)
+      if (error.response) {
+        alert(`Failed to refund transaction: ${error.response.data?.error || error.response.statusText}`)
+      } else if (error.code === 'ERR_NETWORK') {
+        alert('Network error: Could not connect to server. Please check your connection and try again.')
+      } else {
+        alert(`Failed to refund transaction: ${error.message}`)
+      }
     }
   }
 
@@ -2627,7 +2687,7 @@ function App() {
       
       if (isValidFile(file)) {
         setImportFile(file)
-        setImportError(null)
+                      setImportError(null)
       } else {
         setImportError('Unsupported file type. Only PNG, JPG/JPEG, and PDF are allowed.')
         e.dataTransfer.clearData()
@@ -2659,7 +2719,7 @@ function App() {
     
     if (isValidFile(file)) {
       setImportFile(file)
-      setImportError(null)
+                      setImportError(null)
     } else {
       setImportError('Unsupported file type. Only PNG, JPG/JPEG, and PDF are allowed.')
       e.target.value = ''
@@ -2695,7 +2755,7 @@ function App() {
 
     setIsImporting(true)
     setImportError(null)
-    setImportProgress(importType === 'file' ? 'Uploading file...' : 'Fetching menu from URL...')
+    setImportProgress(importType === 'file' ? 'Uploading file...' : 'Processing menu URL...')
 
     try {
       let uploadResponse
@@ -2914,6 +2974,8 @@ function App() {
                   setImportUrl('')
                   setImportProgress(null)
                   setIsImporting(false)
+                  setParseStatus('idle')
+                  setParsedData(null)
                 }, 3000)
               } else if (status === 'failed') {
                 clearInterval(pollInterval)
@@ -2961,6 +3023,8 @@ function App() {
           setImportUrl('')
           setImportProgress(null)
           setIsImporting(false)
+          setParseStatus('idle')
+          setParsedData(null)
         }, 2000)
         
         // Return early since URL import is complete
@@ -3008,6 +3072,8 @@ function App() {
               setImportUrl('')
               setImportProgress(null)
               setIsImporting(false)
+              setParseStatus('idle')
+              setParsedData(null)
             }, 1500)
           } else if (statusResponse.data.status === 'failed') {
             throw new Error(statusResponse.data.error || 'Analysis failed')
@@ -3669,6 +3735,12 @@ function App() {
       return
     }
 
+    // If payment method is Cash, show cash change modal
+    if (selectedPaymentMethod === 'Cash') {
+      setIsCashChangeModalOpen(true)
+      return
+    }
+
     // If payment method is Card, process with Stripe Terminal
     let stripePaymentIntentId = null
     if (selectedPaymentMethod === 'Card') {
@@ -3688,6 +3760,12 @@ function App() {
       }
     }
     
+    // Process the payment transaction (for Card payments)
+    await processPaymentTransaction(stripePaymentIntentId)
+  }
+
+  // Process payment transaction - shared logic for both Card and Cash
+  const processPaymentTransaction = async (stripePaymentIntentId = null) => {
     // Format the name: 
     // - If last part is a single character (initial), format as "FirstName L."
     // - If last part is multiple characters (full last name), keep as "FirstName LastName"
@@ -3812,11 +3890,13 @@ function App() {
       setCart([])
       localStorage.removeItem(STORAGE_KEYS.CART)
       
-      // Close the modal and reset states
+      // Close the modals and reset states
       setIsCustomerNameModalOpen(false)
+      setIsCashChangeModalOpen(false)
       setCustomerName('')
       setTableNumber('')
       setSelectedPaymentMethod(null)
+      setCashAmountReceived('')
       setOrderType(null)
       localStorage.removeItem(STORAGE_KEYS.ORDER_TYPE)
     } catch (error) {
@@ -3916,6 +3996,48 @@ function App() {
     setCustomerName('')
     setTableNumber('')
     setSelectedPaymentMethod(null)
+  }
+
+  // Handle cash amount selection from pre-selected buttons
+  const handleCashAmountSelect = (amount) => {
+    setCashAmountReceived(amount.toString())
+  }
+
+  // Handle manual cash amount entry
+  const handleCashAmountChange = (e) => {
+    const value = e.target.value
+    // Only allow numbers and decimal point
+    if (value === '' || /^\d*\.?\d*$/.test(value)) {
+      setCashAmountReceived(value)
+    }
+  }
+
+  // Calculate change
+  const calculateChange = () => {
+    const cashAmount = parseFloat(cashAmountReceived) || 0
+    const change = cashAmount - total
+    return change >= 0 ? change : 0
+  }
+
+  // Handle cash payment confirmation
+  const handleConfirmCashPayment = async () => {
+    const cashAmount = parseFloat(cashAmountReceived) || 0
+    
+    if (!cashAmountReceived || cashAmount === 0) {
+      alert('Please enter the cash amount received')
+      return
+    }
+
+    if (cashAmount < total) {
+      alert(`Insufficient payment. Total is $${total.toFixed(2)}, but only $${cashAmount.toFixed(2)} was received.`)
+      return
+    }
+
+    // Close cash change modal
+    setIsCashChangeModalOpen(false)
+    
+    // Process the payment transaction
+    await processPaymentTransaction(null)
   }
 
   // Save all data before logout
@@ -6195,10 +6317,15 @@ function App() {
     }
   }
 
-  const handleDeleteProduct = async (productId) => {
-    if (!window.confirm('Are you sure you want to delete this product?')) {
-      return
-    }
+  const handleDeleteProduct = (productId) => {
+    setProductToDeleteId(productId)
+    setIsDeleteProductModalOpen(true)
+  }
+
+  const confirmDeleteProduct = async () => {
+    if (!productToDeleteId) return
+
+    const productId = productToDeleteId
 
     try {
       // Try to delete from backend (if available)
@@ -6224,9 +6351,58 @@ function App() {
       if (editingProductId === productId) {
         cancelEditing()
       }
+
+      // Close the modal
+      setIsDeleteProductModalOpen(false)
+      setProductToDeleteId(null)
     } catch (error) {
       console.error('Error deleting product:', error)
       alert('Error deleting product. Please try again.')
+      setIsDeleteProductModalOpen(false)
+      setProductToDeleteId(null)
+    }
+  }
+
+  const handleDeleteAll = async () => {
+    try {
+      const userEmail = currentUser?.email || ''
+      if (!userEmail) {
+        alert('Must be logged in to delete items.')
+        return
+      }
+
+      // Delete all products
+      const deletePromises = products.map(product => 
+        axios.delete(`${API_BASE_URL}/products/${product.id}`, {
+          params: { userEmail }
+        }).catch(err => {
+          console.error(`Error deleting product ${product.id}:`, err)
+          // Continue even if individual deletes fail
+        })
+      )
+
+      await Promise.all(deletePromises)
+
+      // Delete all categories except "All"
+      const newCategories = ['All']
+      await saveCategoriesToBackend(newCategories)
+
+      // Update local state
+      setProducts([])
+      setCategories(newCategories)
+      setSelectedCategory('All')
+
+      // Close modals
+      setIsDeleteAllModalOpen(false)
+      cancelEditing()
+      setIsEditModalOpen(false)
+
+      // Reload from backend to ensure consistency
+      await reloadProductsFromBackend()
+    } catch (error) {
+      console.error('Error deleting all items:', error)
+      alert('Error deleting all items. Please try again.')
+      setIsDeleteAllModalOpen(false)
     }
   }
 
@@ -9873,6 +10049,31 @@ function App() {
                       >
                         Today
                       </button>
+                      <button
+                        onClick={() => {
+                          // TODO: Implement SMS/email distribution logic
+                          console.log('Send schedule clicked')
+                        }}
+                        style={{
+                          padding: '0.85rem 1.5rem',
+                          backgroundColor: '#16a34a',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontSize: '1.1rem',
+                          fontWeight: '600',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem'
+                        }}
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                          <polyline points="22,6 12,13 2,6"></polyline>
+                        </svg>
+                        Send Schedule
+                      </button>
                     </div>
 
                     {/* Schedule Table */}
@@ -10493,6 +10694,34 @@ function App() {
                                 }, 0).toFixed(2)}
                               </div>
                             </div>
+                          </div>
+                          <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'center' }}>
+                            <button
+                              onClick={() => {
+                                // TODO: Implement payroll distribution logic
+                                console.log('Distribute Funds clicked')
+                              }}
+                              style={{
+                                padding: '1rem 2.5rem',
+                                fontSize: '1.1rem',
+                                fontWeight: '600',
+                                color: 'white',
+                                backgroundColor: '#1e3a5f',
+                                border: 'none',
+                                borderRadius: '8px',
+                                cursor: 'pointer',
+                                transition: 'background-color 0.2s',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.target.style.backgroundColor = '#2a4f7a'
+                              }}
+                              onMouseLeave={(e) => {
+                                e.target.style.backgroundColor = '#1e3a5f'
+                              }}
+                            >
+                              Distribute Funds
+                            </button>
                           </div>
                         </div>
                         
@@ -11140,17 +11369,29 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                 {isMenuRoute && (
                   <>
                     {isEditMode && (
-                      <button 
-                        className="auto-import-menu-btn"
-                        onClick={() => setIsAutoImportModalOpen(true)}
-                      >
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                          <polyline points="17 8 12 3 7 8"></polyline>
-                          <line x1="12" y1="3" x2="12" y2="15"></line>
-                        </svg>
-                        <span>Auto Import Menu</span>
-                      </button>
+                      <>
+                        <button 
+                          className="delete-all-btn"
+                          onClick={() => setIsDeleteAllModalOpen(true)}
+                        >
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                          </svg>
+                          <span>Delete All</span>
+                        </button>
+                        <button 
+                          className="auto-import-menu-btn"
+                          onClick={() => setIsAutoImportModalOpen(true)}
+                        >
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="17 8 12 3 7 8"></polyline>
+                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                          </svg>
+                          <span>Auto Import Menu</span>
+                        </button>
+                      </>
                     )}
                     <button 
                       className={`edit-menu-btn ${isEditMode ? 'active' : ''}`}
@@ -12015,6 +12256,71 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
           </div>
         )}
 
+        {/* Delete All Items & Sections Modal */}
+        {isDeleteAllModalOpen && (
+          <div className="modal-overlay" onClick={() => setIsDeleteAllModalOpen(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px', height: 'auto', maxHeight: '90vh', minHeight: 'auto', borderRadius: '12px' }}>
+              <div className="modal-header">
+                <h2>Delete All Items & Sections</h2>
+                <button className="modal-close-btn" onClick={() => setIsDeleteAllModalOpen(false)}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </button>
+              </div>
+              <div className="modal-body" style={{ padding: '1.5rem', textAlign: 'center', overflowY: 'visible', flex: 'none' }}>
+                <p style={{ fontSize: '1.1rem', margin: '0 0 1.5rem 0', color: '#333' }}>
+                  Are you sure you want to delete ALL products and ALL sections?
+                </p>
+                <p style={{ fontSize: '0.95rem', margin: '0', color: '#666' }}>
+                  This will permanently delete all items and sections. This action cannot be undone.
+                </p>
+              </div>
+              <div className="modal-footer" style={{ display: 'flex', gap: '1rem', padding: '1rem 1.5rem', borderTop: '2px solid #c0c0c0' }}>
+                <button
+                  onClick={() => setIsDeleteAllModalOpen(false)}
+                  style={{
+                    flex: 1,
+                    padding: '0.75rem 1.5rem',
+                    backgroundColor: '#6c757d',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '600',
+                    transition: 'background-color 0.2s'
+                  }}
+                  onMouseOver={(e) => e.target.style.backgroundColor = '#5a6268'}
+                  onMouseOut={(e) => e.target.style.backgroundColor = '#6c757d'}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteAll}
+                  style={{
+                    flex: 1,
+                    padding: '0.75rem 1.5rem',
+                    backgroundColor: '#dc3545',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '600',
+                    transition: 'background-color 0.2s'
+                  }}
+                  onMouseOver={(e) => e.target.style.backgroundColor = '#c82333'}
+                  onMouseOut={(e) => e.target.style.backgroundColor = '#dc3545'}
+                >
+                  Delete All
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Category Edit Modal */}
         {isCategoryModalOpen && (
           <div className="modal-overlay" onClick={() => setIsCategoryModalOpen(false)}>
@@ -12653,6 +12959,174 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
         </div>
       )}
 
+      {/* Cash Change Modal */}
+      {isCashChangeModalOpen && (
+        <div className="modal-overlay" onClick={() => {
+          setIsCashChangeModalOpen(false)
+          setCashAmountReceived('')
+        }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Cash Payment</h2>
+              <button className="modal-close-btn" onClick={() => {
+                setIsCashChangeModalOpen(false)
+                setCashAmountReceived('')
+              }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            <div className="modal-body">
+              <div style={{ marginBottom: '1.5rem' }}>
+                <div style={{ 
+                  fontSize: '1.1rem', 
+                  fontWeight: '600', 
+                  color: '#333',
+                  marginBottom: '0.5rem'
+                }}>
+                  Total Amount
+                </div>
+                <div style={{ 
+                  fontSize: '2rem', 
+                  fontWeight: '700', 
+                  color: '#1e3a5f'
+                }}>
+                  ${total.toFixed(2)}
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                <label style={{ 
+                  display: 'block', 
+                  marginBottom: '0.75rem', 
+                  fontWeight: '600',
+                  color: '#333'
+                }}>
+                  Cash Amount Received
+                </label>
+                
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(3, 1fr)', 
+                  gap: '0.75rem',
+                  marginBottom: '1rem'
+                }}>
+                  <button
+                    className={`payment-method-btn ${cashAmountReceived === '5' ? 'selected' : ''}`}
+                    onClick={() => handleCashAmountSelect(5)}
+                    style={{
+                      padding: '1rem',
+                      fontSize: '1.1rem',
+                      fontWeight: '600'
+                    }}
+                  >
+                    $5
+                  </button>
+                  <button
+                    className={`payment-method-btn ${cashAmountReceived === '10' ? 'selected' : ''}`}
+                    onClick={() => handleCashAmountSelect(10)}
+                    style={{
+                      padding: '1rem',
+                      fontSize: '1.1rem',
+                      fontWeight: '600'
+                    }}
+                  >
+                    $10
+                  </button>
+                  <button
+                    className={`payment-method-btn ${cashAmountReceived === '20' ? 'selected' : ''}`}
+                    onClick={() => handleCashAmountSelect(20)}
+                    style={{
+                      padding: '1rem',
+                      fontSize: '1.1rem',
+                      fontWeight: '600'
+                    }}
+                  >
+                    $20
+                  </button>
+                </div>
+
+                <input
+                  type="text"
+                  value={cashAmountReceived}
+                  onChange={handleCashAmountChange}
+                  placeholder="Enter amount manually"
+                  className="form-input"
+                  style={{
+                    fontSize: '1.2rem',
+                    padding: '0.75rem',
+                    textAlign: 'center',
+                    fontWeight: '600'
+                  }}
+                  autoFocus={true}
+                />
+              </div>
+
+              {cashAmountReceived && parseFloat(cashAmountReceived) >= total && (
+                <div style={{
+                  marginTop: '1.5rem',
+                  padding: '1rem',
+                  backgroundColor: '#f0f9ff',
+                  border: '2px solid #0066cc',
+                  borderRadius: '8px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{
+                    fontSize: '0.9rem',
+                    color: '#666',
+                    marginBottom: '0.5rem'
+                  }}>
+                    Change Due
+                  </div>
+                  <div style={{
+                    fontSize: '2rem',
+                    fontWeight: '700',
+                    color: '#0066cc'
+                  }}>
+                    ${calculateChange().toFixed(2)}
+                  </div>
+                </div>
+              )}
+
+              {cashAmountReceived && parseFloat(cashAmountReceived) > 0 && parseFloat(cashAmountReceived) < total && (
+                <div style={{
+                  marginTop: '1rem',
+                  padding: '0.75rem',
+                  backgroundColor: '#fff3cd',
+                  border: '1px solid #ffc107',
+                  borderRadius: '8px',
+                  color: '#856404',
+                  fontSize: '0.9rem',
+                  textAlign: 'center'
+                }}>
+                  Insufficient payment. Please enter at least ${total.toFixed(2)}
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button 
+                className="btn-cancel-small" 
+                onClick={() => {
+                  setIsCashChangeModalOpen(false)
+                  setCashAmountReceived('')
+                }}
+              >
+                Cancel
+              </button>
+              <button 
+                className="btn-primary-small" 
+                onClick={handleConfirmCashPayment}
+                disabled={!cashAmountReceived || parseFloat(cashAmountReceived) < total}
+              >
+                Complete Payment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Order Type Warning Modal */}
       {isOrderTypeWarningModalOpen && (
         <div className="modal-overlay" onClick={() => setIsOrderTypeWarningModalOpen(false)}>
@@ -12660,12 +13134,15 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
             className="modal-content" 
             onClick={(e) => e.stopPropagation()}
             style={{ 
-              width: '300px', 
-              height: '300px', 
+              width: '500px', 
+              height: '400px', 
               maxWidth: '90vw', 
-              maxHeight: '90vw',
+              maxHeight: '90vh',
               display: 'flex',
-              flexDirection: 'column'
+              flexDirection: 'column',
+              overflow: 'hidden',
+              borderBottomLeftRadius: '12px',
+              borderBottomRightRadius: '12px'
             }}
           >
             <div className="modal-header">
@@ -12679,11 +13156,14 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
             </div>
             <div className="modal-body" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <p style={{ 
-                fontSize: '1.5rem', 
-                fontWeight: 'bold', 
-                color: 'red', 
+                fontSize: '2.25rem', 
+                fontWeight: '700', 
+                color: '#dc2626', 
                 textAlign: 'center', 
-                margin: 0 
+                margin: 0,
+                letterSpacing: '0.05em',
+                textShadow: '0 2px 4px rgba(220, 38, 38, 0.2)',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
               }}>
                 Please select ORDER TYPE
               </p>
@@ -12704,8 +13184,16 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
       {/* Transaction Details Modal */}
       {selectedTransaction && (
         <div className="modal-overlay" onClick={() => setSelectedTransaction(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ width: '600px', height: '600px', maxWidth: '90vw', maxHeight: '90vw', aspectRatio: '1 / 1' }}>
-            <div className="modal-header">
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ 
+            width: '600px', 
+            maxWidth: '90vw', 
+            maxHeight: '90vh',
+            height: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div className="modal-header" style={{ flexShrink: 0 }}>
               <h2 style={{ textDecoration: 'none', borderBottom: 'none' }}>{selectedTransaction.customerName}</h2>
               <button className="modal-close-btn" onClick={() => setSelectedTransaction(null)}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -12714,7 +13202,12 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                 </svg>
               </button>
             </div>
-            <div className="modal-body" style={{ overflowY: 'auto' }}>
+            <div className="modal-body transaction-modal-body" style={{ 
+              overflowY: 'auto', 
+              flex: 1,
+              minHeight: 0,
+              padding: '1.25rem'
+            }}>
               <div style={{ 
                 marginBottom: '1.5rem',
                 paddingBottom: '1.5rem',
@@ -12844,11 +13337,30 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                 </div>
               </div>
             </div>
-            <div className="modal-footer">
+            <div className="modal-footer" style={{ 
+              display: 'flex', 
+              gap: '1rem',
+              backgroundColor: 'transparent',
+              borderTop: 'none',
+              padding: '1rem 1.5rem 0.75rem 1.5rem',
+              marginTop: '0',
+              flexShrink: 0
+            }}>
+              <button 
+                className="btn-primary-small" 
+                onClick={handleRefundTransaction}
+                style={{ 
+                  flex: 1,
+                  backgroundColor: '#dc3545',
+                  borderColor: '#dc3545'
+                }}
+              >
+                Refund
+              </button>
               <button 
                 className="btn-primary-small" 
                 onClick={() => setSelectedTransaction(null)}
-                style={{ width: '100%' }}
+                style={{ flex: 1 }}
               >
                 Close
               </button>
@@ -12946,6 +13458,80 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                 onMouseOut={(e) => e.target.style.backgroundColor = '#dc3545'}
               >
                 Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Product Confirmation Modal */}
+      {isDeleteProductModalOpen && productToDeleteId && (
+        <div className="modal-overlay" onClick={() => {
+          setIsDeleteProductModalOpen(false)
+          setProductToDeleteId(null)
+        }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '500px', height: 'auto', maxHeight: '90vh', minHeight: 'auto', borderRadius: '12px' }}>
+            <div className="modal-header">
+              <h2>Delete Product</h2>
+              <button className="modal-close-btn" onClick={() => {
+                setIsDeleteProductModalOpen(false)
+                setProductToDeleteId(null)
+              }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            <div className="modal-body" style={{ padding: '1.5rem', textAlign: 'center', overflowY: 'visible', flex: 'none' }}>
+              <p style={{ fontSize: '1.1rem', margin: '0 0 1.5rem 0', color: '#333' }}>
+                Are you sure you want to delete this product?
+              </p>
+              <p style={{ fontSize: '0.95rem', margin: '0', color: '#666' }}>
+                This action cannot be undone.
+              </p>
+            </div>
+            <div className="modal-footer" style={{ display: 'flex', gap: '1rem', padding: '1rem 1.5rem', borderTop: '2px solid #c0c0c0' }}>
+              <button
+                onClick={() => {
+                  setIsDeleteProductModalOpen(false)
+                  setProductToDeleteId(null)
+                }}
+                style={{
+                  flex: 1,
+                  padding: '0.75rem 1.5rem',
+                  backgroundColor: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '1rem',
+                  fontWeight: '600',
+                  transition: 'background-color 0.2s'
+                }}
+                onMouseOver={(e) => e.target.style.backgroundColor = '#5a6268'}
+                onMouseOut={(e) => e.target.style.backgroundColor = '#6c757d'}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteProduct}
+                style={{
+                  flex: 1,
+                  padding: '0.75rem 1.5rem',
+                  backgroundColor: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '1rem',
+                  fontWeight: '600',
+                  transition: 'background-color 0.2s'
+                }}
+                onMouseOver={(e) => e.target.style.backgroundColor = '#c82333'}
+                onMouseOut={(e) => e.target.style.backgroundColor = '#dc3545'}
+              >
+                Delete
               </button>
             </div>
           </div>
@@ -13426,6 +14012,8 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                     setImportUrl('')
                     setImportError(null)
                     setImportProgress(null)
+                    setParseStatus('idle')
+                    setParsedData(null)
                   }
                 }}
                 disabled={isImporting}
@@ -13591,7 +14179,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                         e.stopPropagation()
                         setImportFile(null)
                         setImportUrl('')
-                        setImportError(null)
+                      setImportError(null)
                       }}
                       disabled={isImporting}
                       style={{
@@ -13670,6 +14258,8 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                     setImportUrl('')
                     setImportError(null)
                     setImportProgress(null)
+                    setParseStatus('idle')
+                    setParsedData(null)
                   }
                 }}
                 disabled={isImporting}
@@ -13752,17 +14342,29 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
             {isMenuRoute && (
               <>
                 {isEditMode && (
-                  <button 
-                    className="auto-import-menu-btn"
-                    onClick={() => setIsAutoImportModalOpen(true)}
-                  >
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                      <polyline points="17 8 12 3 7 8"></polyline>
-                      <line x1="12" y1="3" x2="12" y2="15"></line>
-                    </svg>
-                    <span>Auto Import Menu</span>
-                  </button>
+                  <>
+                    <button 
+                      className="delete-all-btn"
+                      onClick={() => setIsDeleteAllModalOpen(true)}
+                    >
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                      <span>Delete All</span>
+                    </button>
+                    <button 
+                      className="auto-import-menu-btn"
+                      onClick={() => setIsAutoImportModalOpen(true)}
+                    >
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                      </svg>
+                      <span>Auto Import Menu</span>
+                    </button>
+                  </>
                 )}
                 <button 
                   className={`edit-menu-btn ${isEditMode ? 'active' : ''}`}
@@ -13785,7 +14387,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
 }
 
 // Export the App component
-export default App
+export { App as default }
 
 
 
