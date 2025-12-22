@@ -937,6 +937,8 @@ function App() {
   const [teamMembers, setTeamMembers] = useState(() => loadFromStorage(STORAGE_KEYS.TEAM_MEMBERS, []))
   // Ref to track if we just did a manual save (to prevent auto-save from running immediately after)
   const justSavedTeamMembersRef = useRef(false)
+  const employeeListContainerRef = useRef(null)
+  const [employeeListMaxHeight, setEmployeeListMaxHeight] = useState(null)
   const [weeklySchedule, setWeeklySchedule] = useState(() => {
     try {
       const stored = localStorage.getItem('pos_weekly_schedule')
@@ -961,7 +963,9 @@ function App() {
     email: '',
     emergencyContact: '',
     hourlyPay: '',
-    password: ''
+    password: '',
+    homeAddress: '',
+    ssn: ''
   })
   const [editingEmployeeId, setEditingEmployeeId] = useState(null)
   const [editingEmployee, setEditingEmployee] = useState({
@@ -971,7 +975,9 @@ function App() {
     email: '',
     emergencyContact: '',
     hourlyPay: '',
-    password: ''
+    password: '',
+    homeAddress: '',
+    ssn: ''
   })
 
   // Function to format date input automatically (adds "/" after MM and DD)
@@ -1785,6 +1791,61 @@ function App() {
       }
     }
   }, [activeView, activeSettingsSection])
+
+  // Calculate max height for employee list to prevent footer overlap
+  useEffect(() => {
+    if (activeView === 'Settings' && activeSettingsSection === 'Team members' && employeeListContainerRef.current) {
+      const calculateEmployeeListMaxHeight = () => {
+        const container = employeeListContainerRef.current
+        const footer = document.querySelector('.navigation-footer')
+        
+        if (!container || !footer) {
+          setEmployeeListMaxHeight(null)
+          return
+        }
+        
+        const containerRect = container.getBoundingClientRect()
+        const footerRect = footer.getBoundingClientRect()
+        
+        // Calculate available space from container top to footer top
+        // Add some padding to prevent content from touching the footer
+        const padding = 20
+        const availableHeight = footerRect.top - containerRect.top - padding
+        
+        // Only enable scrolling when there are 5 or more employees (as per user requirement)
+        // and if there's reasonable space available
+        if (teamMembers.length >= 5 && availableHeight > 200) {
+          setEmployeeListMaxHeight(`${availableHeight}px`)
+        } else if (teamMembers.length >= 5 && availableHeight > 0) {
+          // For smaller spaces with 5+ employees, still set maxHeight to enable scrolling
+          setEmployeeListMaxHeight(`${availableHeight}px`)
+        } else {
+          // If less than 5 employees or no space available, don't set maxHeight
+          setEmployeeListMaxHeight(null)
+        }
+      }
+      
+      // Calculate on mount, when teamMembers changes, and on resize
+      const timeoutId = setTimeout(calculateEmployeeListMaxHeight, 100)
+      window.addEventListener('resize', calculateEmployeeListMaxHeight)
+      
+      // Also recalculate when settings content scrolls (in case container position changes)
+      const settingsContent = document.querySelector('.settings-content')
+      if (settingsContent) {
+        settingsContent.addEventListener('scroll', calculateEmployeeListMaxHeight)
+      }
+      
+      return () => {
+        clearTimeout(timeoutId)
+        window.removeEventListener('resize', calculateEmployeeListMaxHeight)
+        if (settingsContent) {
+          settingsContent.removeEventListener('scroll', calculateEmployeeListMaxHeight)
+        }
+      }
+    } else {
+      setEmployeeListMaxHeight(null)
+    }
+  }, [activeView, activeSettingsSection, teamMembers])
 
   // Restore category from URL when on menu (only on initial load, not on every URL change)
   useEffect(() => {
@@ -8808,7 +8869,7 @@ function App() {
                 <div 
                   ref={settingsContentRef}
                   className="settings-content" 
-                  style={{ maxWidth: 'none', margin: 0, flex: 1, overflowY: activeSettingsSection === 'Team members' ? 'hidden' : 'auto', overflowX: 'hidden', width: '100%', padding: activeSettingsSection === 'Team members' ? '2rem 1rem' : '2rem 1rem', minHeight: 0, position: 'relative', zIndex: 50, boxSizing: 'border-box' }}>
+                  style={{ maxWidth: 'none', margin: 0, flex: 1, overflowY: 'auto', overflowX: 'hidden', width: '100%', padding: activeSettingsSection === 'Team members' ? '2rem 1rem' : '2rem 1rem', minHeight: 0, position: 'relative', zIndex: 50, boxSizing: 'border-box' }}>
                   {activeSettingsSection === 'Account' && (
                   <div className="settings-form account-settings-container" style={{ maxWidth: '1200px', margin: '0 auto', padding: '1rem', boxSizing: 'border-box', width: '100%', overflow: 'visible' }}>
                     {/* Payment Method and Owner/Manager Section - Original Layout with Scale */}
@@ -9502,9 +9563,20 @@ function App() {
                   
                   {activeSettingsSection === 'Team members' && (
                   <div className="settings-form team-members-container" style={{ marginLeft: '0', position: 'relative', zIndex: 100, width: '100%', maxWidth: '100%', boxSizing: 'border-box', overflowX: 'hidden', overflowY: 'visible' }}>
-                    <div className="team-members-wrapper" style={{ display: 'flex', flexWrap: 'nowrap', gap: '1.5rem', width: '100%', alignItems: 'flex-start', boxSizing: 'border-box', paddingRight: '0', overflowX: 'hidden', overflowY: 'hidden', height: 'calc(100vh - 200px)' }}>
+                    {/* Fixed: Removed fixed height and overflow-hidden that was clipping the Add Employee form button */}
+                    <div className="team-members-wrapper" style={{ display: 'flex', flexWrap: 'nowrap', gap: '1.5rem', width: '100%', alignItems: 'flex-start', boxSizing: 'border-box', paddingRight: '0', overflowX: 'hidden', overflowY: 'visible', minHeight: 'calc(100vh - 200px)' }}>
                       {/* Employees List */}
-                      <div style={{ flex: '1 1 0', minWidth: '280px', height: '100%', overflowX: 'hidden', overflowY: 'auto', boxSizing: 'border-box' }}>
+                      <div 
+                        ref={employeeListContainerRef}
+                        style={{ 
+                          flex: '1 1 0', 
+                          minWidth: '280px', 
+                          height: employeeListMaxHeight ? 'auto' : '100%',
+                          maxHeight: employeeListMaxHeight || 'none',
+                          overflowX: 'hidden', 
+                          overflowY: employeeListMaxHeight ? 'auto' : 'visible', 
+                          boxSizing: 'border-box' 
+                        }}>
                         {teamMembers.length === 0 ? (
                           <p style={{ color: '#666', fontStyle: 'italic' }}>No employees added yet.</p>
                         ) : (
@@ -9636,11 +9708,38 @@ function App() {
                                         style={{ width: '100%' }}
                                       />
                                     </div>
+                                    <div className="settings-input-group" style={{ overflowX: 'visible', overflowY: 'visible' }}>
+                                      <label htmlFor={`employee-home-address-edit-${employee.id}`} style={{ fontSize: '0.85rem', fontWeight: '600', color: '#1e3a5f', marginBottom: '0.25rem', whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word', overflowX: 'visible', overflowY: 'visible', maxWidth: '100%' }}>Home Address</label>
+                                      <input
+                                        type="text"
+                                        id={`employee-home-address-edit-${employee.id}`}
+                                        name={`employee-home-address-edit-${employee.id}`}
+                                        autoComplete="street-address"
+                                        value={editingEmployee.homeAddress || ''}
+                                        onChange={(e) => setEditingEmployee({ ...editingEmployee, homeAddress: e.target.value })}
+                                        placeholder="Enter home address"
+                                        className="settings-input"
+                                        style={{ width: '100%' }}
+                                      />
+                                    </div>
+                                    <div className="settings-input-group" style={{ overflowX: 'visible', overflowY: 'visible' }}>
+                                      <label htmlFor={`employee-ssn-edit-${employee.id}`} style={{ fontSize: '0.85rem', fontWeight: '600', color: '#1e3a5f', marginBottom: '0.25rem', whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word', overflowX: 'visible', overflowY: 'visible', maxWidth: '100%' }}>SSN</label>
+                                      <input
+                                        type="text"
+                                        id={`employee-ssn-edit-${employee.id}`}
+                                        name={`employee-ssn-edit-${employee.id}`}
+                                        value={editingEmployee.ssn || ''}
+                                        onChange={(e) => setEditingEmployee({ ...editingEmployee, ssn: e.target.value })}
+                                        placeholder="Enter SSN"
+                                        className="settings-input"
+                                        style={{ width: '100%' }}
+                                      />
+                                    </div>
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', flexShrink: 0, minWidth: '105px', justifyContent: 'center' }}>
                                     <button
                                       onClick={async () => {
-                                        if (editingEmployee.name && editingEmployee.age && editingEmployee.contact && editingEmployee.email && editingEmployee.emergencyContact && editingEmployee.hourlyPay && editingEmployee.password) {
+                                        if (editingEmployee.name && editingEmployee.age && editingEmployee.contact && editingEmployee.email && editingEmployee.emergencyContact && editingEmployee.hourlyPay && editingEmployee.password && editingEmployee.homeAddress && editingEmployee.ssn) {
                                           const updatedTeamMembers = teamMembers.map(emp => 
                                             emp.id === employee.id 
                                               ? { ...emp, ...editingEmployee }
@@ -9664,7 +9763,7 @@ function App() {
                                             }
                                           }
                                           setEditingEmployeeId(null)
-                                          setEditingEmployee({ name: '', age: '', contact: '', email: '', emergencyContact: '', hourlyPay: '', password: '' })
+                                          setEditingEmployee({ name: '', age: '', contact: '', email: '', emergencyContact: '', hourlyPay: '', password: '', homeAddress: '', ssn: '' })
                                         } else {
                                           alert('Please fill in all fields')
                                         }
@@ -9689,7 +9788,7 @@ function App() {
                                     <button
                                       onClick={() => {
                                         setEditingEmployeeId(null)
-                                        setEditingEmployee({ name: '', age: '', contact: '', email: '', emergencyContact: '', hourlyPay: '', password: '' })
+                                        setEditingEmployee({ name: '', age: '', contact: '', email: '', emergencyContact: '', hourlyPay: '', password: '', homeAddress: '', ssn: '' })
                                       }}
                                       style={{
                                         padding: '0.6rem 1rem',
@@ -9750,7 +9849,9 @@ function App() {
                                           email: employee.email || '',
                                           emergencyContact: employee.emergencyContact,
                                           hourlyPay: employee.hourlyPay || '',
-                                          password: employee.password || ''
+                                          password: employee.password || '',
+                                          homeAddress: employee.homeAddress || '',
+                                          ssn: employee.ssn || ''
                                         })
                                       }}
                                       style={{
@@ -9804,8 +9905,8 @@ function App() {
                       </div>
                       
                       {/* Add Employee Form */}
-                      <div className="add-employee-form" style={{ padding: '1.5rem', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', flex: '0 0 420px', minWidth: '280px', maxWidth: '470px', boxSizing: 'border-box', position: 'sticky', top: '0', zIndex: 101, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between', overflowX: 'hidden', overflowY: 'visible', resize: 'none', height: 'calc(100vh - 200px)', alignSelf: 'flex-start' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem', width: '100%', alignItems: 'center', overflowX: 'hidden', overflowY: 'visible', flex: 1, justifyContent: 'space-evenly' }}>
+                      <div className="add-employee-form" style={{ padding: '1.5rem', paddingBottom: '25px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', flex: '0 0 420px', minWidth: '280px', maxWidth: '470px', boxSizing: 'border-box', position: 'sticky', top: '0', zIndex: 101, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', overflowX: 'hidden', overflowY: 'visible', resize: 'none', height: 'calc(100vh - 150px)', alignSelf: 'flex-start' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0', width: '100%', alignItems: 'center', overflowX: 'hidden', overflowY: 'visible', flex: '1 1 auto', justifyContent: 'space-evenly', minHeight: 0, maxHeight: '100%' }}>
                         <div className="settings-input-group" style={{ width: '100%' }}>
                           <input
                             type="text"
@@ -9816,7 +9917,7 @@ function App() {
                             onChange={(e) => setNewEmployee({ ...newEmployee, name: e.target.value })}
                             placeholder="Enter employee name"
                             className="settings-input"
-                            style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
+                            style={{ width: '100%', paddingTop: '0.875rem', paddingBottom: '0.875rem' }}
                           />
                         </div>
                         <div className="settings-input-group" style={{ maxWidth: '350px', width: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
@@ -9832,7 +9933,7 @@ function App() {
                             }}
                             placeholder="mm/dd/yyyy"
                             className="settings-input"
-                            style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
+                            style={{ width: '100%', paddingTop: '0.875rem', paddingBottom: '0.875rem' }}
                           />
                         </div>
                         <div className="settings-input-group" style={{ maxWidth: '350px', width: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
@@ -9845,7 +9946,7 @@ function App() {
                             onChange={(e) => setNewEmployee({ ...newEmployee, email: e.target.value })}
                             placeholder="Enter email address"
                             className="settings-input"
-                            style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
+                            style={{ width: '100%', paddingTop: '0.875rem', paddingBottom: '0.875rem' }}
                           />
                         </div>
                         <div className="settings-input-group" style={{ maxWidth: '350px', width: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
@@ -9861,7 +9962,7 @@ function App() {
                             }}
                             placeholder="Enter phone number"
                             className="settings-input"
-                            style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
+                            style={{ width: '100%', paddingTop: '0.875rem', paddingBottom: '0.875rem' }}
                           />
                         </div>
                         <div className="settings-input-group" style={{ maxWidth: '350px', width: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
@@ -9877,7 +9978,7 @@ function App() {
                             }}
                             placeholder="Emergency contact"
                             className="settings-input"
-                            style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
+                            style={{ width: '100%', paddingTop: '0.875rem', paddingBottom: '0.875rem' }}
                           />
                         </div>
                         <div className="settings-input-group" style={{ maxWidth: '350px', width: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
@@ -9889,7 +9990,7 @@ function App() {
                             onChange={(e) => setNewEmployee({ ...newEmployee, hourlyPay: e.target.value })}
                             placeholder="Enter hourly pay rate"
                             className="settings-input"
-                            style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
+                            style={{ width: '100%', paddingTop: '0.875rem', paddingBottom: '0.875rem' }}
                             min="0"
                             step="0.01"
                           />
@@ -9904,13 +10005,38 @@ function App() {
                             onChange={(e) => setNewEmployee({ ...newEmployee, password: e.target.value })}
                             placeholder="Enter password for clock-in access"
                             className="settings-input"
-                            style={{ width: '100%', paddingTop: '1.0625rem', paddingBottom: '1.0625rem' }}
+                            style={{ width: '100%', paddingTop: '0.875rem', paddingBottom: '0.875rem' }}
+                          />
+                        </div>
+                        <div className="settings-input-group" style={{ maxWidth: '350px', width: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
+                          <input
+                            type="text"
+                            id="employee-home-address-new"
+                            name="employee-home-address-new"
+                            autoComplete="street-address"
+                            value={newEmployee.homeAddress}
+                            onChange={(e) => setNewEmployee({ ...newEmployee, homeAddress: e.target.value })}
+                            placeholder="Enter home address"
+                            className="settings-input"
+                            style={{ width: '100%', paddingTop: '0.875rem', paddingBottom: '0.875rem' }}
+                          />
+                        </div>
+                        <div className="settings-input-group" style={{ maxWidth: '350px', width: '100%', overflowX: 'hidden', overflowY: 'visible' }}>
+                          <input
+                            type="text"
+                            id="employee-ssn-new"
+                            name="employee-ssn-new"
+                            value={newEmployee.ssn}
+                            onChange={(e) => setNewEmployee({ ...newEmployee, ssn: e.target.value })}
+                            placeholder="Enter SSN"
+                            className="settings-input"
+                            style={{ width: '100%', paddingTop: '0.875rem', paddingBottom: '0.875rem' }}
                           />
                         </div>
                       </div>
                       <button
                         onClick={async () => {
-                          if (newEmployee.name && newEmployee.age && newEmployee.contact && newEmployee.email && newEmployee.emergencyContact && newEmployee.hourlyPay && newEmployee.password) {
+                          if (newEmployee.name && newEmployee.age && newEmployee.contact && newEmployee.email && newEmployee.emergencyContact && newEmployee.hourlyPay && newEmployee.password && newEmployee.homeAddress && newEmployee.ssn) {
                             const employee = {
                               id: Date.now(),
                               name: newEmployee.name,
@@ -9919,7 +10045,9 @@ function App() {
                               email: newEmployee.email,
                               emergencyContact: newEmployee.emergencyContact,
                               hourlyPay: newEmployee.hourlyPay,
-                              password: newEmployee.password
+                              password: newEmployee.password,
+                              homeAddress: newEmployee.homeAddress,
+                              ssn: newEmployee.ssn
                             }
                             console.log('📝 Creating new employee with all fields:', {
                               id: employee.id,
@@ -9950,13 +10078,13 @@ function App() {
                                 justSavedTeamMembersRef.current = false // Reset on error
                               }
                             }
-                            setNewEmployee({ name: '', age: '', contact: '', email: '', emergencyContact: '', hourlyPay: '', password: '' })
+                            setNewEmployee({ name: '', age: '', contact: '', email: '', emergencyContact: '', hourlyPay: '', password: '', homeAddress: '', ssn: '' })
                           } else {
                             alert('Please fill in all fields')
                           }
                         }}
                         style={{
-                          marginTop: '1.5rem',
+                          marginTop: 'auto',
                           padding: '0.75rem 1.5rem',
                           backgroundColor: '#1e3a5f',
                           color: 'white',

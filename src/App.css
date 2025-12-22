@@ -130,12 +130,13 @@ html, body, #root {
 
 /* Enable scrolling for Compliance and Terms and Conditions routes */
 /* Allow content to grow and enable scrolling on the wrapper */
+/* Fixed: Changed max-height to min-height to prevent clipping of Add Employee form */
 .settings-content-wrapper:has(.settings-form),
 .settings-content-wrapper:has(.tos-view) {
   overflow-y: auto;
   overflow-x: hidden;
   align-items: flex-start;
-  max-height: calc(100vh - var(--footer-h));
+  min-height: calc(100vh - var(--footer-h));
 }
 
 
