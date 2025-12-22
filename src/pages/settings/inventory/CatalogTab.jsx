@@ -19,6 +19,13 @@ export default function CatalogTab({ userEmail }) {
     return () => window.removeEventListener('inventory:catalog-add-item', handleCatalogAddItem);
   }, []);
 
+  // Notify parent of active section changes for context-aware header buttons
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('inventory:catalog-section-changed', { 
+      detail: { activeSection } 
+    }));
+  }, [activeSection]);
+
   return (
     <div>
       {/* Section Tabs */}

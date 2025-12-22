@@ -10,6 +10,8 @@ export default function LocationsTab({ userEmail }) {
   const [editingLocation, setEditingLocation] = useState(null);
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [formData, setFormData] = useState({ name: '', sort_order: 0 });
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [locationToDelete, setLocationToDelete] = useState(null);
 
   useEffect(() => {
     if (userEmail) {
@@ -72,6 +74,37 @@ export default function LocationsTab({ userEmail }) {
     }
   };
 
+  const handleEditLocation = (location, e) => {
+    if (e) {
+      e.stopPropagation(); // Prevent triggering the card click
+    }
+    setEditingLocation(location);
+    setFormData({
+      name: location.name,
+      sort_order: location.sort_order || 0
+    });
+    setShowModal(true);
+  };
+
+  const handleDeleteLocation = async () => {
+    if (!locationToDelete) return;
+    
+    try {
+      setLoading(true);
+      setError(null);
+      await inventoryApi.deleteLocation(locationToDelete.id, userEmail);
+      setShowDeleteConfirm(false);
+      setLocationToDelete(null);
+      setSelectedLocation(null); // Close the detail drawer if it's open
+      await loadLocations();
+    } catch (err) {
+      console.error('Error deleting location:', err);
+      setError(err.response?.data?.error || err.message || 'Failed to delete location');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     // Listen for add location event from header
     const handleAddLocation = () => {
@@ -106,14 +139,13 @@ export default function LocationsTab({ userEmail }) {
           {locations.filter(loc => loc && loc.id).map(location => (
             <div
               key={location.id}
-              onClick={() => handleViewDetails(location)}
               style={{
                 padding: '1.5rem',
                 backgroundColor: '#f8f9fa',
                 borderRadius: '8px',
                 border: '1px solid #e0e0e0',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
+                transition: 'all 0.2s',
+                position: 'relative'
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.backgroundColor = '#e9ecef';
@@ -124,12 +156,14 @@ export default function LocationsTab({ userEmail }) {
                 e.currentTarget.style.transform = 'translateY(0)';
               }}
             >
-              <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', fontWeight: '600' }}>
-                {location.name}
-              </h3>
-              <p style={{ margin: 0, color: '#666', fontSize: '0.9rem' }}>
-                Sort Order: {location.sort_order}
-              </p>
+              <div onClick={() => handleViewDetails(location)} style={{ cursor: 'pointer' }}>
+                <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.2rem', fontWeight: '600' }}>
+                  {location.name}
+                </h3>
+                <p style={{ margin: '0 0 1rem 0', color: '#666', fontSize: '0.9rem' }}>
+                  Sort Order: {location.sort_order}
+                </p>
+              </div>
             </div>
           ))}
         </div>
@@ -180,7 +214,39 @@ export default function LocationsTab({ userEmail }) {
           userEmail={userEmail}
           onClose={() => setSelectedLocation(null)}
           onRefresh={loadLocations}
+          onEdit={() => handleEditLocation(selectedLocation)}
+          onDelete={() => {
+            setLocationToDelete(selectedLocation);
+            setShowDeleteConfirm(true);
+          }}
         />
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && locationToDelete && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1001 }} onClick={() => { setShowDeleteConfirm(false); setLocationToDelete(null); }}>
+          <div style={{ backgroundColor: 'white', padding: '2rem', borderRadius: '8px', maxWidth: '400px', width: '90%' }} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ marginTop: 0, marginBottom: '1rem', color: '#dc3545' }}>Confirm Delete</h2>
+            <p style={{ marginBottom: '1.5rem', color: '#666' }}>
+              Are you sure you want to delete <strong>{locationToDelete.name}</strong>? This action cannot be undone.
+            </p>
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+              <button 
+                onClick={() => { setShowDeleteConfirm(false); setLocationToDelete(null); }} 
+                style={{ padding: '0.75rem 1.5rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' }}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleDeleteLocation} 
+                disabled={loading}
+                style={{ padding: '0.75rem 1.5rem', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '6px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: '600', opacity: loading ? 0.5 : 1 }}
+              >
+                {loading ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -254,7 +320,7 @@ function LocationModal({ editingLocation, formData, setFormData, onSave, onClose
   );
 }
 
-function LocationDetailDrawer({ location, userEmail, onClose, onRefresh }) {
+function LocationDetailDrawer({ location, userEmail, onClose, onRefresh, onEdit, onDelete }) {
   const [assigningItem, setAssigningItem] = useState(false);
   const [availableItems, setAvailableItems] = useState([]);
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -386,7 +452,43 @@ function LocationDetailDrawer({ location, userEmail, onClose, onRefresh }) {
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <h2 style={{ margin: 0 }}>{location.name || 'Location'}</h2>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#666' }}>×</button>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          {onEdit && (
+            <button 
+              onClick={onEdit} 
+              style={{ 
+                padding: '0.5rem 1rem', 
+                backgroundColor: '#6c757d', 
+                color: 'white', 
+                border: 'none', 
+                borderRadius: '4px', 
+                cursor: 'pointer', 
+                fontSize: '0.9rem',
+                fontWeight: '600'
+              }}
+            >
+              Edit
+            </button>
+          )}
+          {onDelete && (
+            <button 
+              onClick={onDelete} 
+              style={{ 
+                padding: '0.5rem 1rem', 
+                backgroundColor: '#dc3545', 
+                color: 'white', 
+                border: 'none', 
+                borderRadius: '4px', 
+                cursor: 'pointer', 
+                fontSize: '0.9rem',
+                fontWeight: '600'
+              }}
+            >
+              Delete
+            </button>
+          )}
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#666', padding: '0.25rem' }}>×</button>
+        </div>
       </div>
 
       <div style={{ marginBottom: '1.5rem' }}>

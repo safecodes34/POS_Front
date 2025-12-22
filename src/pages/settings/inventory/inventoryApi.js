@@ -159,9 +159,9 @@ export const inventoryApi = {
     return response.data;
   },
 
-  deleteVendor: async (id, userEmail) => {
+  deleteVendor: async (id, userEmail, force = true) => {
     const response = await axios.delete(`${API_BASE_URL}/vendors/${id}`, {
-      params: { userEmail }
+      params: { userEmail, force: force.toString() }
     });
     return response.data;
   },

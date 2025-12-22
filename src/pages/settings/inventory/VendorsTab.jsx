@@ -10,6 +10,8 @@ export default function VendorsTab({ userEmail }) {
   const [editingVendor, setEditingVendor] = useState(null);
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [formData, setFormData] = useState({ name: '', type: 'MANUAL' });
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [vendorToDelete, setVendorToDelete] = useState(null);
 
   useEffect(() => {
     if (userEmail) {
@@ -80,6 +82,34 @@ export default function VendorsTab({ userEmail }) {
     }
   };
 
+  const handleDeleteVendor = async () => {
+    if (!vendorToDelete) return;
+    
+    try {
+      setLoading(true);
+      setError(null);
+      await inventoryApi.deleteVendor(vendorToDelete.id, userEmail);
+      setShowDeleteConfirm(false);
+      setVendorToDelete(null);
+      setSelectedVendor(null); // Close the detail panel
+      await loadVendors();
+    } catch (err) {
+      console.error('Error deleting vendor:', err);
+      setError(err.response?.data?.error || err.message || 'Failed to delete vendor');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditVendor = (vendor) => {
+    setEditingVendor(vendor);
+    setFormData({
+      name: vendor.name,
+      type: vendor.type || 'MANUAL'
+    });
+    setShowModal(true);
+  };
+
   return (
     <div style={{ display: 'flex', gap: '2rem' }}>
       <div style={{ flex: '0 0 300px' }}>
@@ -136,7 +166,17 @@ export default function VendorsTab({ userEmail }) {
       </div>
 
       {selectedVendor && (
-        <VendorDetailPanel vendor={selectedVendor} userEmail={userEmail} onClose={() => setSelectedVendor(null)} onRefresh={loadVendors} />
+        <VendorDetailPanel 
+          vendor={selectedVendor} 
+          userEmail={userEmail} 
+          onClose={() => setSelectedVendor(null)} 
+          onRefresh={loadVendors}
+          onEdit={() => handleEditVendor(selectedVendor)}
+          onDelete={() => {
+            setVendorToDelete(selectedVendor);
+            setShowDeleteConfirm(true);
+          }}
+        />
       )}
       {showModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowModal(false)}>
@@ -161,11 +201,38 @@ export default function VendorsTab({ userEmail }) {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && vendorToDelete && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1001 }} onClick={() => { setShowDeleteConfirm(false); setVendorToDelete(null); }}>
+          <div style={{ backgroundColor: 'white', padding: '2rem', borderRadius: '8px', maxWidth: '400px', width: '90%' }} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ marginTop: 0, marginBottom: '1rem', color: '#dc3545' }}>Confirm Delete</h2>
+            <p style={{ marginBottom: '1.5rem', color: '#666' }}>
+              Are you sure you want to delete <strong>{vendorToDelete.name}</strong>? This action cannot be undone.
+            </p>
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+              <button 
+                onClick={() => { setShowDeleteConfirm(false); setVendorToDelete(null); }} 
+                style={{ padding: '0.75rem 1.5rem', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '600' }}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleDeleteVendor} 
+                disabled={loading}
+                style={{ padding: '0.75rem 1.5rem', backgroundColor: '#dc3545', color: 'white', border: 'none', borderRadius: '6px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: '600', opacity: loading ? 0.5 : 1 }}
+              >
+                {loading ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function VendorDetailPanel({ vendor, userEmail, onClose, onRefresh }) {
+function VendorDetailPanel({ vendor, userEmail, onClose, onRefresh, onEdit, onDelete }) {
   const [items, setItems] = useState([]);
   const [mappingItem, setMappingItem] = useState(null);
   const [mappingToItemId, setMappingToItemId] = useState('');
@@ -199,7 +266,43 @@ function VendorDetailPanel({ vendor, userEmail, onClose, onRefresh }) {
           <h2 style={{ margin: 0 }}>{vendor.name}</h2>
           <p style={{ margin: '0.25rem 0 0 0', color: '#666', fontSize: '0.9rem' }}>Type: {vendor.type}</p>
         </div>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#666' }}>×</button>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          {onEdit && (
+            <button 
+              onClick={onEdit} 
+              style={{ 
+                padding: '0.5rem 1rem', 
+                backgroundColor: '#6c757d', 
+                color: 'white', 
+                border: 'none', 
+                borderRadius: '4px', 
+                cursor: 'pointer', 
+                fontSize: '0.9rem',
+                fontWeight: '600'
+              }}
+            >
+              Edit
+            </button>
+          )}
+          {onDelete && (
+            <button 
+              onClick={onDelete} 
+              style={{ 
+                padding: '0.5rem 1rem', 
+                backgroundColor: '#dc3545', 
+                color: 'white', 
+                border: 'none', 
+                borderRadius: '4px', 
+                cursor: 'pointer', 
+                fontSize: '0.9rem',
+                fontWeight: '600'
+              }}
+            >
+              Delete
+            </button>
+          )}
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#666', padding: '0.25rem' }}>×</button>
+        </div>
       </div>
 
       {vendor.type !== 'MANUAL' && (

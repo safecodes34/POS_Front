@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { inventoryApi } from './inventoryApi';
 import InventoryErrorDisplay from './InventoryErrorDisplay';
 
@@ -19,6 +19,9 @@ export default function ItemsTab({ userEmail }) {
   });
   const [searchTerm, setSearchTerm] = useState('');
   const [filterActive, setFilterActive] = useState('all');
+  const [tableMaxHeight, setTableMaxHeight] = useState(null);
+  const tableContainerRef = useRef(null);
+  const contentWrapperRef = useRef(null);
 
   useEffect(() => {
     if (userEmail) {
@@ -46,6 +49,130 @@ export default function ItemsTab({ userEmail }) {
       window.removeEventListener('inventory:items-updated', handleItemsUpdated);
     };
   }, [userEmail]);
+
+  // Detect overflow and calculate max height for table container
+  useLayoutEffect(() => {
+    const calculateMaxHeight = () => {
+      try {
+        if (!contentWrapperRef.current || !tableContainerRef.current) return;
+
+        // Get viewport height
+        const viewportHeight = window.innerHeight;
+        if (!viewportHeight || viewportHeight <= 0) return;
+        
+        // Get footer height from CSS variable or measure it
+        let footerHeight = 100; // default fallback
+        try {
+          const footer = document.querySelector('.navigation-footer');
+          if (footer) {
+            const rect = footer.getBoundingClientRect();
+            footerHeight = rect.height || footerHeight;
+          } else {
+            const cssVar = getComputedStyle(document.documentElement).getPropertyValue('--footer-h');
+            if (cssVar) {
+              footerHeight = parseInt(cssVar) || footerHeight;
+            }
+          }
+        } catch (e) {
+          console.warn('Error getting footer height:', e);
+        }
+        
+        // Get the top position of the content wrapper
+        let contentTop = 0;
+        try {
+          const rect = contentWrapperRef.current.getBoundingClientRect();
+          contentTop = rect.top || 0;
+        } catch (e) {
+          console.warn('Error getting content top:', e);
+          return;
+        }
+        
+        // Calculate available height: viewport - footer - content top position - some padding
+        const availableHeight = viewportHeight - footerHeight - contentTop - 20; // 20px padding
+        
+        // Get the height of elements above the table (filters, error display, etc.)
+        let elementsAboveTable = 0;
+        try {
+          // Find all elements before the table container
+          const children = Array.from(contentWrapperRef.current.children);
+          const tableIndex = children.indexOf(tableContainerRef.current);
+          if (tableIndex > 0) {
+            // Sum heights of all elements before the table
+            for (let i = 0; i < tableIndex; i++) {
+              const child = children[i];
+              if (child) {
+                const rect = child.getBoundingClientRect();
+                if (rect.height > 0) {
+                  elementsAboveTable += rect.height;
+                }
+                // Also add margin-bottom if present
+                const styles = window.getComputedStyle(child);
+                const marginBottom = parseInt(styles.marginBottom) || 0;
+                elementsAboveTable += marginBottom;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Error calculating elements above table:', e);
+        }
+        
+        // Calculate max height for table container
+        const maxTableHeight = Math.max(0, availableHeight - elementsAboveTable);
+        
+        // Only set max height if it's positive and less than the table's natural height
+        // Also ensure we have a minimum height (at least 200px) for usability
+        if (maxTableHeight > 200) {
+          const tableNaturalHeight = tableContainerRef.current.scrollHeight;
+          if (tableNaturalHeight > maxTableHeight) {
+            setTableMaxHeight(maxTableHeight);
+          } else {
+            setTableMaxHeight(null);
+          }
+        } else {
+          setTableMaxHeight(null);
+        }
+      } catch (error) {
+        console.error('Error calculating table max height:', error);
+        // Don't break the component if calculation fails
+        setTableMaxHeight(null);
+      }
+    };
+
+    // Calculate on mount and when content changes
+    const timeoutId = setTimeout(calculateMaxHeight, 0);
+
+    // Recalculate on window resize
+    const handleResize = () => {
+      calculateMaxHeight();
+    };
+    window.addEventListener('resize', handleResize);
+    
+    // Use MutationObserver to detect DOM changes in the table
+    let observer = null;
+    try {
+      observer = new MutationObserver(() => {
+        calculateMaxHeight();
+      });
+
+      if (tableContainerRef.current) {
+        observer.observe(tableContainerRef.current, {
+          childList: true,
+          subtree: true,
+          attributes: false
+        });
+      }
+    } catch (e) {
+      console.warn('Error setting up MutationObserver:', e);
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(timeoutId);
+      if (observer) {
+        observer.disconnect();
+      }
+    };
+  }, [items.length, searchTerm, filterActive, loading, error]);
 
   const loadItems = async () => {
     try {
@@ -151,7 +278,7 @@ export default function ItemsTab({ userEmail }) {
   }
 
   return (
-    <div>
+    <div ref={contentWrapperRef}>
       <InventoryErrorDisplay 
         error={error} 
         onRetry={loadItems}
@@ -192,7 +319,14 @@ export default function ItemsTab({ userEmail }) {
 
       {/* Items Table */}
       {filteredItems.length > 0 ? (
-        <div style={{ overflowX: 'auto' }}>
+        <div 
+          ref={tableContainerRef}
+          style={{ 
+            overflowX: 'auto',
+            overflowY: tableMaxHeight ? 'auto' : 'visible',
+            maxHeight: tableMaxHeight ? `${tableMaxHeight}px` : 'none'
+          }}
+        >
           <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', borderRadius: '8px', overflow: 'hidden' }}>
             <thead>
               <tr style={{ backgroundColor: '#f8f9fa', borderBottom: '2px solid #e0e0e0' }}>

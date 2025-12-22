@@ -52,6 +52,18 @@ export default function InventoryRoutes({ userEmail }) {
     }
   }, [subRoute, navigate]);
 
+  // Track active catalog section for context-aware actions
+  const [catalogSection, setCatalogSection] = React.useState('items');
+
+  React.useEffect(() => {
+    const handleCatalogSectionChanged = (e) => {
+      setCatalogSection(e.detail?.activeSection || 'items');
+    };
+    
+    window.addEventListener('inventory:catalog-section-changed', handleCatalogSectionChanged);
+    return () => window.removeEventListener('inventory:catalog-section-changed', handleCatalogSectionChanged);
+  }, []);
+
   // Get contextual actions based on route - simplified to core actions only
   const getActions = () => {
     switch (subRoute) {
@@ -81,11 +93,26 @@ export default function InventoryRoutes({ userEmail }) {
           }}
         };
       case 'catalog':
-        return {
-          primary: { label: 'Add Item', onClick: () => {
-            window.dispatchEvent(new CustomEvent('inventory:catalog-add-item'));
-          }}
-        };
+        // Context-aware action based on active catalog section
+        if (catalogSection === 'vendors') {
+          return {
+            primary: { label: 'Add Vendor', onClick: () => {
+              window.dispatchEvent(new CustomEvent('inventory:add-vendor'));
+            }}
+          };
+        } else if (catalogSection === 'locations') {
+          return {
+            primary: { label: 'Add Location', onClick: () => {
+              window.dispatchEvent(new CustomEvent('inventory:add-location'));
+            }}
+          };
+        } else {
+          return {
+            primary: { label: 'Add Item', onClick: () => {
+              window.dispatchEvent(new CustomEvent('inventory:catalog-add-item'));
+            }}
+          };
+        }
       case 'recipes':
         return {
           primary: { label: 'Add Recipe', onClick: () => {
