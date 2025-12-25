@@ -9581,19 +9581,19 @@ function App() {
                   )}
                   
                   {activeSettingsSection === 'Team members' && (
-                  <div className="settings-form team-members-container" style={{ marginLeft: '0', position: 'relative', zIndex: 100, width: '100%', maxWidth: '100%', boxSizing: 'border-box', overflowX: 'hidden', overflowY: 'visible' }}>
+                  <div className="settings-form team-members-container" style={{ marginLeft: '0', position: 'relative', zIndex: 100, width: '100%', maxWidth: '100%', boxSizing: 'border-box', overflowX: 'hidden', overflowY: 'hidden' }}>
                     {/* Fixed: Removed fixed height and overflow-hidden that was clipping the Add Employee form button */}
-                    <div className="team-members-wrapper" style={{ display: 'flex', flexWrap: 'nowrap', gap: '1.5rem', width: '100%', alignItems: 'flex-start', boxSizing: 'border-box', paddingRight: '0', overflowX: 'hidden', overflowY: 'visible', minHeight: 'calc(100vh - 200px)' }}>
+                    <div className="team-members-wrapper" style={{ display: 'flex', flexWrap: 'nowrap', gap: '1.5rem', width: '100%', alignItems: 'flex-start', boxSizing: 'border-box', paddingRight: '0', overflowX: 'hidden', overflowY: 'hidden', height: 'calc(100vh - 200px)' }}>
                       {/* Employees List */}
                       <div 
                         ref={employeeListContainerRef}
                         style={{ 
                           flex: '1 1 0', 
                           minWidth: '280px', 
-                          height: employeeListMaxHeight ? 'auto' : '100%',
-                          maxHeight: employeeListMaxHeight || 'none',
+                          height: '100%',
+                          maxHeight: '100%',
                           overflowX: 'hidden', 
-                          overflowY: employeeListMaxHeight ? 'auto' : 'visible', 
+                          overflowY: 'auto', 
                           boxSizing: 'border-box' 
                         }}>
                         {teamMembers.length === 0 ? (
@@ -9924,8 +9924,8 @@ function App() {
                       </div>
                       
                       {/* Add Employee Form */}
-                      <div className="add-employee-form" style={{ padding: '1.5rem', paddingBottom: '25px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', flex: '0 0 420px', minWidth: '280px', maxWidth: '470px', boxSizing: 'border-box', position: 'sticky', top: '0', zIndex: 101, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', overflowX: 'hidden', overflowY: 'visible', resize: 'none', height: 'calc(100vh - 150px)', alignSelf: 'flex-start' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0', width: '100%', alignItems: 'center', overflowX: 'hidden', overflowY: 'visible', flex: '1 1 auto', justifyContent: 'space-evenly', minHeight: 0, maxHeight: '100%' }}>
+                      <div className="add-employee-form" style={{ padding: '1.5rem', paddingBottom: '25px', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0', flex: '0 0 420px', minWidth: '280px', maxWidth: '470px', boxSizing: 'border-box', position: 'sticky', top: '0', zIndex: 101, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', overflowX: 'hidden', overflowY: 'hidden', resize: 'none', height: '100%', maxHeight: '100%', alignSelf: 'flex-start' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0', width: '100%', alignItems: 'center', overflowX: 'hidden', overflowY: 'hidden', flex: '1 1 auto', justifyContent: 'space-evenly', minHeight: 0, maxHeight: '100%' }}>
                         <div className="settings-input-group" style={{ width: '100%' }}>
                           <input
                             type="text"
