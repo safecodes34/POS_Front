@@ -51,7 +51,7 @@ export default function InvoiceImport({ userEmail, onComplete }) {
         } else if (result.status === 'needs_review' || result.status === 'complete') {
           // Stop polling
         } else if (result.status === 'error') {
-          setError('Import failed. Please try again.');
+          setError(result.error || 'Import failed. Please try again.');
         }
       } catch (err) {
         console.error('Error polling job status:', err);

@@ -128,15 +128,24 @@ html, body, #root {
   pointer-events: none;
 }
 
-/* Enable scrolling for Compliance and Terms and Conditions routes */
+/* Enable scrolling for Compliance routes */
 /* Allow content to grow and enable scrolling on the wrapper */
 /* Fixed: Changed max-height to min-height to prevent clipping of Add Employee form */
-.settings-content-wrapper:has(.settings-form),
-.settings-content-wrapper:has(.tos-view) {
+.settings-content-wrapper:has(.settings-form) {
   overflow-y: auto;
   overflow-x: hidden;
   align-items: flex-start;
   min-height: calc(100vh - var(--footer-h));
+  pointer-events: auto; /* Enable pointer events for scrolling */
+  max-height: calc(100vh - var(--footer-h)); /* Add max-height to enable scrolling */
+}
+
+/* Terms and Conditions - scrolling happens on settingsContentRef (.settings-content), not wrapper */
+.settings-content-wrapper:has(.tos-view) {
+  overflow: visible;
+  align-items: flex-start;
+  min-height: calc(100vh - var(--footer-h));
+  pointer-events: auto;
 }
 
 
@@ -3228,6 +3237,19 @@ html, body, #root {
 
 .settings-content::-webkit-scrollbar {
   display: none; /* Chrome, Safari, Opera */
+}
+
+/* Ensure Terms and Conditions content is scrollable */
+.settings-content:has(.tos-view) {
+  max-height: calc(100vh - var(--footer-h));
+  overflow-y: auto;
+}
+
+/* Enable scrolling for Compliance section content */
+.settings-content-wrapper:has(.settings-form) .settings-content {
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: calc(100vh - var(--footer-h));
 }
 
 /* Settings Form Styles */

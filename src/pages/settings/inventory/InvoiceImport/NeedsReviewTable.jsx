@@ -1,6 +1,81 @@
 import React, { useState, useEffect } from 'react';
 import { inventoryApi } from '../inventoryApi';
 
+/**
+ * Intelligent fuzzy matching similar to backend fuzzyMatchItem
+ * Returns best match with confidence score
+ */
+function fuzzyMatchItem(name, inventoryItems, threshold = 0.4) {
+  const normalizedName = name.toLowerCase().trim();
+  
+  let bestMatch = null;
+  let bestScore = 0;
+
+  for (const item of inventoryItems) {
+    const itemName = item.name.toLowerCase().trim();
+    
+    // Exact match
+    if (itemName === normalizedName) {
+      return { item, confidence: 1.0 };
+    }
+
+    // SKU match
+    if (item.sku && normalizedName.includes(item.sku.toLowerCase())) {
+      return { item, confidence: 0.95 };
+    }
+
+    // Token-based similarity (Jaccard)
+    const nameTokens = new Set(normalizedName.split(/\s+/));
+    const itemTokens = new Set(itemName.split(/\s+/));
+    const intersection = new Set([...nameTokens].filter(x => itemTokens.has(x)));
+    const union = new Set([...nameTokens, ...itemTokens]);
+    const jaccard = intersection.size / union.size;
+
+    // Substring match bonus
+    const contains = itemName.includes(normalizedName) || normalizedName.includes(itemName);
+    const containsScore = contains ? 0.3 : 0;
+
+    const score = jaccard * 0.7 + containsScore;
+    
+    if (score > bestScore && score >= threshold) {
+      bestScore = score;
+      bestMatch = item;
+    }
+  }
+
+  if (bestMatch) {
+    return { item: bestMatch, confidence: bestScore };
+  }
+
+  return null;
+}
+
+/**
+ * Generate suggestions for a line (top 3 matches)
+ */
+function generateSuggestions(lineName, items) {
+  return items
+    .map(item => {
+      const name1 = lineName.toLowerCase();
+      const name2 = item.name.toLowerCase();
+      const tokens1 = new Set(name1.split(/\s+/));
+      const tokens2 = new Set(name2.split(/\s+/));
+      const intersection = new Set([...tokens1].filter(x => tokens2.has(x)));
+      const union = new Set([...tokens1, ...tokens2]);
+      const jaccard = intersection.size / union.size;
+      
+      // Substring bonus
+      const contains = name2.includes(name1) || name1.includes(name2);
+      const containsScore = contains ? 0.3 : 0;
+      const score = jaccard * 0.7 + containsScore;
+      
+      return { item, score };
+    })
+    .filter(m => m.score > 0.3)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+}
+
 export default function NeedsReviewTable({ 
   unmatchedLines, 
   matchedLines, 
@@ -17,31 +92,47 @@ export default function NeedsReviewTable({
     loadItems();
   }, []);
 
+  // Auto-select best matches when items are loaded
   useEffect(() => {
-    // Generate suggestions for each unmatched line
-    const newSuggestions = {};
-    unmatchedLines.forEach(line => {
-      if (!resolutions[line.id]) {
-        // Find best matches
-        const matches = items
-          .map(item => {
-            const name1 = line.name.toLowerCase();
-            const name2 = item.name.toLowerCase();
-            const tokens1 = new Set(name1.split(/\s+/));
-            const tokens2 = new Set(name2.split(/\s+/));
-            const intersection = new Set([...tokens1].filter(x => tokens2.has(x)));
-            const union = new Set([...tokens1, ...tokens2]);
-            const score = intersection.size / union.size;
-            return { item, score };
-          })
-          .filter(m => m.score > 0.3)
-          .sort((a, b) => b.score - a.score)
-          .slice(0, 3);
+    if (items.length > 0 && unmatchedLines.length > 0) {
+      setResolutions(prev => {
+        const autoResolutions = {};
+        let hasNewResolutions = false;
         
-        newSuggestions[line.id] = matches;
-      }
-    });
-    setSuggestions(newSuggestions);
+        unmatchedLines.forEach(line => {
+          // Only auto-select if not already resolved
+          if (!prev[line.id]) {
+            const bestMatch = fuzzyMatchItem(line.name, items, 0.4);
+            if (bestMatch) {
+              autoResolutions[line.id] = {
+                action: 'match_existing',
+                inventoryItemId: bestMatch.item.id,
+                confidence: bestMatch.confidence,
+                autoSelected: true
+              };
+              hasNewResolutions = true;
+            }
+          }
+        });
+        
+        // Only update if we have new auto-resolutions
+        return hasNewResolutions ? { ...prev, ...autoResolutions } : prev;
+      });
+    }
+  }, [items, unmatchedLines]);
+
+  // Generate suggestions for display
+  useEffect(() => {
+    if (items.length > 0) {
+      const newSuggestions = {};
+      unmatchedLines.forEach(line => {
+        if (!resolutions[line.id]?.inventoryItemId) {
+          const matches = generateSuggestions(line.name, items);
+          newSuggestions[line.id] = matches;
+        }
+      });
+      setSuggestions(newSuggestions);
+    }
   }, [unmatchedLines, items, resolutions]);
 
   const loadItems = async () => {
@@ -105,7 +196,7 @@ export default function NeedsReviewTable({
                     <div style={{ fontWeight: '500', marginBottom: '0.25rem' }}>
                       {line.name}
                     </div>
-                    {lineSuggestions.length > 0 && !resolution && (
+                    {lineSuggestions.length > 0 && resolution?.action !== 'match_existing' && (
                       <div style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.25rem' }}>
                         <strong>Suggestions:</strong>
                         {lineSuggestions.map((s, idx) => (
@@ -133,12 +224,20 @@ export default function NeedsReviewTable({
                   <td style={{ padding: '0.75rem' }}>{line.qty} {line.unit}</td>
                   <td style={{ padding: '0.75rem' }}>${line.unitCost.toFixed(2)}</td>
                   <td style={{ padding: '0.75rem' }}>
-                    {!resolution ? (
-                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    {resolution?.action !== 'create_new' && resolution?.action !== 'ignore' ? (
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
                         <select
+                          value={resolution?.inventoryItemId || ''}
                           onChange={(e) => {
                             if (e.target.value) {
                               handleResolution(line.id, 'match_existing', { inventoryItemId: e.target.value });
+                            } else {
+                              // Clear selection if user selects "Select item..."
+                              setResolutions(prev => {
+                                const next = { ...prev };
+                                delete next[line.id];
+                                return next;
+                              });
                             }
                           }}
                           style={{
@@ -146,7 +245,8 @@ export default function NeedsReviewTable({
                             border: '1px solid #1e3a5f',
                             borderRadius: '4px',
                             fontSize: '0.85rem',
-                            minWidth: '150px'
+                            minWidth: '150px',
+                            backgroundColor: resolution?.autoSelected ? '#e7f3ff' : 'white'
                           }}
                         >
                           <option value="">Select item...</option>
@@ -154,6 +254,11 @@ export default function NeedsReviewTable({
                             <option key={item.id} value={item.id}>{item.name}</option>
                           ))}
                         </select>
+                        {resolution?.autoSelected && (
+                          <span style={{ fontSize: '0.75rem', color: '#666', fontStyle: 'italic' }}>
+                            (Auto-selected)
+                          </span>
+                        )}
                         <button
                           onClick={() => {
                             const name = prompt('Item name:', line.name);
@@ -193,13 +298,15 @@ export default function NeedsReviewTable({
                           Ignore
                         </button>
                       </div>
-                    ) : (
+                    ) : resolution?.action === 'create_new' ? (
                       <div style={{ fontSize: '0.85rem', color: '#28a745' }}>
-                        {resolution.action === 'match_existing' && '✓ Matched'}
-                        {resolution.action === 'create_new' && '✓ Will Create'}
-                        {resolution.action === 'ignore' && '✗ Ignored'}
+                        ✓ Will Create: {resolution.newItemPayload?.name || line.name}
                       </div>
-                    )}
+                    ) : resolution?.action === 'ignore' ? (
+                      <div style={{ fontSize: '0.85rem', color: '#6c757d' }}>
+                        ✗ Ignored
+                      </div>
+                    ) : null}
                   </td>
                 </tr>
               );

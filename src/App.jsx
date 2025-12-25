@@ -8349,27 +8349,33 @@ function App() {
                               </button>
                             </>
                           ) : (
-                            // Already clocked out
-                            <div style={{
-                              flex: 1,
-                              padding: '0.875rem 1rem',
-                              borderRadius: '8px',
-                              backgroundColor: '#f3f4f6',
-                              color: '#6b7280',
-                              fontSize: '0.95rem',
-                              fontWeight: '500',
-                              textAlign: 'center',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              gap: '0.5rem'
-                            }}>
+                            // Already clocked out - allow clocking in again for a new shift
+                            <button
+                              onClick={() => handleClockIn(employee.id)}
+                              style={{
+                                flex: 1,
+                                padding: '0.875rem 1rem',
+                                borderRadius: '8px',
+                                border: 'none',
+                                backgroundColor: '#16a34a',
+                                color: '#fff',
+                                fontSize: '0.95rem',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '0.5rem',
+                                transition: 'all 0.2s ease'
+                              }}
+                              title={clockInCheck.warning || 'Click to clock in again (password required)'}
+                            >
                               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                                <polyline points="9 11 12 14 22 4"></polyline>
+                                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
                               </svg>
-                              Shift Completed
-                            </div>
+                              Clock In Again
+                            </button>
                           )}
                         </div>
 
@@ -8869,7 +8875,20 @@ function App() {
                 <div 
                   ref={settingsContentRef}
                   className="settings-content" 
-                  style={{ maxWidth: 'none', margin: 0, flex: 1, overflowY: 'auto', overflowX: 'hidden', width: '100%', padding: activeSettingsSection === 'Team members' ? '2rem 1rem' : '2rem 1rem', minHeight: 0, position: 'relative', zIndex: 50, boxSizing: 'border-box' }}>
+                  style={{ 
+                    maxWidth: 'none', 
+                    margin: 0, 
+                    flex: 1, 
+                    overflowY: 'auto', 
+                    overflowX: 'hidden', 
+                    width: '100%', 
+                    padding: activeSettingsSection === 'Team members' ? '2rem 1rem' : '2rem 1rem', 
+                    minHeight: 0, 
+                    maxHeight: activeSettingsSection === 'Terms and Conditions' ? 'calc(100vh - var(--footer-h))' : 'none',
+                    position: 'relative', 
+                    zIndex: 50, 
+                    boxSizing: 'border-box' 
+                  }}>
                   {activeSettingsSection === 'Account' && (
                   <div className="settings-form account-settings-container" style={{ maxWidth: '1200px', margin: '0 auto', padding: '1rem', boxSizing: 'border-box', width: '100%', overflow: 'visible' }}>
                     {/* Payment Method and Owner/Manager Section - Original Layout with Scale */}
@@ -10674,7 +10693,7 @@ function App() {
                   )}
                   
                   {activeSettingsSection === 'Payroll' && (
-                  <div className="settings-form" style={{ height: '100%', display: 'flex', flexDirection: 'column', maxWidth: '1600px', width: '100%', padding: '0 2rem' }}>
+                  <div className="settings-form" style={{ display: 'flex', flexDirection: 'column', maxWidth: '1600px', width: '100%', padding: '2rem' }}>
                     
                     {teamMembers.length === 0 ? (
                       <div style={{ 
