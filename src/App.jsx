@@ -8060,7 +8060,7 @@ function App() {
           </div>
         ) : activeView === 'Timesheets' ? (
           <div className="checks-view" style={{ width: '100%', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-            <div className="timesheet-scroll-container" style={{ maxWidth: '1200px', margin: '0 auto', flex: 1, overflowY: 'auto', width: '100%', padding: '2rem' }}>
+            <div className="timesheet-scroll-container" style={{ maxWidth: '1200px', margin: '0 auto', flex: 1, overflowY: 'auto', width: '100%', padding: '2rem', maxHeight: 'calc(100vh - var(--footer-h))' }}>
               {teamMembers.length === 0 ? (
                 <div style={{ 
                   textAlign: 'center', 
@@ -10338,8 +10338,6 @@ function App() {
                   
                   {activeSettingsSection === 'Edit time-sheets' && (
                   <div className="settings-form" style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: '1rem', overflow: 'hidden' }}>
-                    <h2 style={{ marginBottom: '1.5rem', fontSize: '1.75rem', fontWeight: '700', color: '#1e3a5f', flexShrink: 0 }}>Edit Time-sheets</h2>
-
                     {teamMembers.length === 0 ? (
                       <div style={{ 
                         padding: '4rem', 
@@ -10439,14 +10437,14 @@ function App() {
                             <div style={{ 
                               backgroundColor: '#f8f9fa', 
                               borderRadius: '16px', 
-                              padding: '2.5rem',
+                              padding: '0 2.5rem 2.5rem 2.5rem',
                               border: '2px solid #e0e0e0',
                               flex: 1,
                               display: 'flex',
                               flexDirection: 'column',
                               minHeight: 0
                             }}>
-                              <div style={{ marginBottom: '2rem' }}>
+                              <div style={{ marginTop: '3rem', marginBottom: '2rem' }}>
                                 <h3 style={{ margin: 0, color: '#1e3a5f', fontSize: '1.4rem', fontWeight: '700' }}>
                                   {teamMembers.find(e => e.id === timesheetEditEmployee)?.name} - {new Date(timesheetEditDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
                                 </h3>

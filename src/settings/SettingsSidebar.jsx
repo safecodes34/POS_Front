@@ -49,6 +49,18 @@ export default function SettingsSidebar() {
         </SidebarItem>
         
         <SidebarItem 
+          to="/settings/compliance"
+          icon={
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              <path d="M9 12l2 2 4-4"></path>
+            </svg>
+          }
+        >
+          Compliance
+        </SidebarItem>
+        
+        <SidebarItem 
           to="/settings/schedule"
           icon={
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -87,15 +99,16 @@ export default function SettingsSidebar() {
         </SidebarItem>
         
         <SidebarItem 
-          to="/settings/compliance"
+          to="/settings/inventory"
           icon={
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-              <path d="M9 12l2 2 4-4"></path>
+              <path d="M20 7h-4V4c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v3H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2z"></path>
+              <path d="M12 11v6"></path>
+              <path d="M9 14h6"></path>
             </svg>
           }
         >
-          Compliance
+          Inventory Management
         </SidebarItem>
         
         <SidebarItem 
@@ -112,19 +125,6 @@ export default function SettingsSidebar() {
           }
         >
           Terms and Conditions
-        </SidebarItem>
-        
-        <SidebarItem 
-          to="/settings/inventory"
-          icon={
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M20 7h-4V4c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v3H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2z"></path>
-              <path d="M12 11v6"></path>
-              <path d="M9 14h6"></path>
-            </svg>
-          }
-        >
-          Inventory Management
         </SidebarItem>
         
         <SidebarItem 

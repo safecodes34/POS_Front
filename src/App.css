@@ -95,9 +95,9 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   background-color: #ffffff;
-  overflow-y: auto;
-  overflow-x: hidden;
+  overflow: hidden;
   box-sizing: border-box;
+  min-height: 0;
 }
 
 .settings-view {
@@ -3859,7 +3859,10 @@ html, body, #root {
 @media (max-width: 768px) {
   /* Reduce padding on smaller screens */
   .add-employee-form {
-    padding: 1rem !important;
+    padding-top: 1rem !important;
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+    padding-bottom: 100px !important;
   }
   
   /* Make form inputs stack better */
@@ -3877,7 +3880,10 @@ html, body, #root {
 @media (max-width: 480px) {
   /* Further reduce padding on very small screens */
   .add-employee-form {
-    padding: 0.75rem !important;
+    padding-top: 0.75rem !important;
+    padding-left: 0.75rem !important;
+    padding-right: 0.75rem !important;
+    padding-bottom: 100px !important;
     min-height: auto !important;
   }
   
