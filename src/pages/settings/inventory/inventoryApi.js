@@ -319,6 +319,12 @@ export const inventoryApi = {
     return response.data;
   },
 
+  updateRecipeIngredient: async (recipeId, ingredientId, data, userEmail) => {
+    // Update is done by delete + create
+    await inventoryApi.deleteRecipeIngredient(recipeId, ingredientId, userEmail);
+    return await inventoryApi.addRecipeIngredient(recipeId, data, userEmail);
+  },
+
   deleteRecipeIngredient: async (recipeId, ingredientId, userEmail) => {
     const response = await axios.delete(`${API_BASE_URL}/recipes/${recipeId}/ingredients/${ingredientId}`, {
       params: { userEmail }

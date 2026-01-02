@@ -48,8 +48,13 @@ export default function InvoiceImport({ userEmail, onComplete }) {
         if (result.status === 'processing' && attempts < maxAttempts) {
           attempts++;
           setTimeout(poll, 1000); // Poll every 1 second
-        } else if (result.status === 'needs_review' || result.status === 'complete') {
-          // Stop polling
+        } else if (result.status === 'needs_review') {
+          // Stop polling, user needs to review
+        } else if (result.status === 'complete') {
+          // Stop polling and notify parent component
+          if (onComplete && result.result) {
+            onComplete(result.result);
+          }
         } else if (result.status === 'error') {
           setError(result.error || 'Import failed. Please try again.');
         }

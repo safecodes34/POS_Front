@@ -228,14 +228,14 @@ export default function ItemsTab({ userEmail }) {
   };
 
   const handleDelete = async (item) => {
-    if (!confirm(`Are you sure you want to delete "${item.name}"? This will set it to inactive instead of deleting if it has movements.`)) {
+    if (!confirm(`Are you sure you want to deactivate "${item.name}"? This will set it to inactive.`)) {
       return;
     }
 
     try {
       setLoading(true);
-      // Soft delete by setting active=false
-      await inventoryApi.updateItem(item.id, { active: false }, userEmail);
+      // Soft delete using DELETE endpoint (sets active=0)
+      await inventoryApi.deleteItem(item.id, userEmail);
       await loadItems();
     } catch (err) {
       console.error('Error deleting item:', err);
@@ -599,7 +599,7 @@ function ItemModal({ editingItem, formData, setFormData, onSave, onClose, loadin
             <option value="gal">Gallon (gal)</option>
           </select>
           <p style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#666' }}>
-            Base UOM is required for consistency in counts and receiving. All quantities will be normalized to this unit.
+            Base UOM is required for consistency in receiving. All quantities will be normalized to this unit.
           </p>
           {formData.base_uom && (
             <p style={{ marginTop: '0.25rem', fontSize: '0.8rem', color: '#999', fontStyle: 'italic' }}>
@@ -617,7 +617,7 @@ function ItemModal({ editingItem, formData, setFormData, onSave, onClose, loadin
             Track Inventory
           </label>
           <p style={{ marginTop: '0.25rem', fontSize: '0.85rem', color: '#666', marginLeft: '1.5rem' }}>
-            When enabled, this item will be included in counts, receiving, and on-hand tracking.
+            When enabled, this item will be included in receiving and on-hand tracking.
           </p>
         </div>
         <div style={{ marginBottom: '1.5rem' }}>

@@ -135,21 +135,6 @@ export default function OverviewTab({ userEmail }) {
           >
             📦 Receive Delivery (Upload Invoice)
           </button>
-          <button
-            onClick={() => navigate('/settings/inventory/counts')}
-            style={{
-              padding: '1rem 2rem',
-              backgroundColor: '#6c757d',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '1rem',
-              fontWeight: '600',
-              cursor: 'pointer'
-            }}
-          >
-            🔢 Start Count
-          </button>
         </div>
       </div>
     );
@@ -203,16 +188,6 @@ export default function OverviewTab({ userEmail }) {
           stats={{
             lastReceived: stats?.last_received_date ? formatDaysAgo(stats.last_received_date) : null,
             pendingCount: stats?.pending_invoices || 0
-          }}
-        />
-        <ContextCard
-          title="Start Count"
-          actionLabel="Start Count"
-          onAction={() => navigate('/settings/inventory/counts')}
-          stats={{
-            nextCountDue: stats?.next_count_due ? formatDaysAgo(stats.next_count_due) : null,
-            lastVariance: stats?.last_count_variance || null,
-            activeCounts: stats?.active_counts || 0
           }}
         />
         <ContextCard
@@ -541,21 +516,6 @@ function ContextCard({ title, actionLabel, onAction, stats }) {
             {stats.pendingCount} invoice{stats.pendingCount !== 1 ? 's' : ''} pending review
           </div>
         )}
-        {stats.nextCountDue && (
-          <div style={{ marginBottom: '0.5rem' }}>
-            <strong>Next cycle count:</strong> {stats.nextCountDue}
-          </div>
-        )}
-        {stats.lastVariance !== null && stats.lastVariance !== undefined && (
-          <div style={{ marginBottom: '0.5rem' }}>
-            <strong>Variance last count:</strong> {formatVariance(stats.lastVariance)}
-          </div>
-        )}
-        {stats.activeCounts !== undefined && stats.activeCounts > 0 && (
-          <div style={{ marginBottom: '0.5rem', color: '#2196F3', fontWeight: '600' }}>
-            {stats.activeCounts} active count{stats.activeCounts !== 1 ? 's' : ''}
-          </div>
-        )}
         {stats.itemsBelowPar !== undefined && stats.itemsBelowPar > 0 && (
           <div style={{ marginBottom: '0.5rem', color: '#f44336', fontWeight: '600' }}>
             {stats.itemsBelowPar} item{stats.itemsBelowPar !== 1 ? 's' : ''} below par
@@ -566,7 +526,7 @@ function ContextCard({ title, actionLabel, onAction, stats }) {
             {stats.reorderSuggestions} suggestion{stats.reorderSuggestions !== 1 ? 's' : ''} ready
           </div>
         )}
-        {!stats.lastReceived && !stats.pendingCount && !stats.nextCountDue && !stats.itemsBelowPar && (
+        {!stats.lastReceived && !stats.pendingCount && !stats.itemsBelowPar && (
           <div style={{ fontStyle: 'italic', color: '#999' }}>
             No data available yet
           </div>

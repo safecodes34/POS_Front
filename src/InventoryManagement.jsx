@@ -65,9 +65,6 @@ function InventoryManagement({ userEmail }) {
   // Delete confirmation
   const [deleteConfirm, setDeleteConfirm] = useState({ show: false, type: null, id: null, name: null });
   
-  // Counts
-  const [counts, setCounts] = useState([]);
-  
   // Invoices
   const [invoices, setInvoices] = useState([]);
   
@@ -93,7 +90,7 @@ function InventoryManagement({ userEmail }) {
 
   // Load locations
   useEffect(() => {
-    if (userEmail && (activeTab === 'locations' || activeTab === 'counts' || activeTab === 'ordering')) {
+    if (userEmail && (activeTab === 'locations' || activeTab === 'ordering')) {
       loadLocations();
     }
   }, [userEmail, activeTab]);
@@ -102,13 +99,6 @@ function InventoryManagement({ userEmail }) {
   useEffect(() => {
     if (userEmail && activeTab === 'vendors') {
       loadVendors();
-    }
-  }, [userEmail, activeTab]);
-
-  // Load counts
-  useEffect(() => {
-    if (userEmail && activeTab === 'counts') {
-      loadCounts();
     }
   }, [userEmail, activeTab]);
 
@@ -171,17 +161,6 @@ function InventoryManagement({ userEmail }) {
         params: { userEmail }
       });
       setVendors(response.data);
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  const loadCounts = async () => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/inventory/counts`, {
-        params: { userEmail }
-      });
-      setCounts(response.data);
     } catch (err) {
       setError(err.message);
     }
@@ -324,7 +303,6 @@ function InventoryManagement({ userEmail }) {
     { id: 'items', label: 'Items' },
     { id: 'locations', label: 'Locations' },
     { id: 'vendors', label: 'Vendors' },
-    { id: 'counts', label: 'Counts' },
     { id: 'receiving', label: 'Receiving' },
     { id: 'ordering', label: 'Ordering' },
     { id: 'recipes', label: 'Recipes' }
@@ -423,10 +401,6 @@ function InventoryManagement({ userEmail }) {
               <div style={{ padding: '1.5rem', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
                 <div style={{ fontSize: '2rem', fontWeight: '700', color: '#1e3a5f' }}>{stats.vendors}</div>
                 <div style={{ color: '#666', marginTop: '0.5rem' }}>Vendors</div>
-              </div>
-              <div style={{ padding: '1.5rem', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
-                <div style={{ fontSize: '2rem', fontWeight: '700', color: '#1e3a5f' }}>{stats.active_counts}</div>
-                <div style={{ color: '#666', marginTop: '0.5rem' }}>Active Counts</div>
               </div>
               <div style={{ padding: '1.5rem', backgroundColor: '#f8f9fa', borderRadius: '8px', border: '1px solid #e0e0e0' }}>
                 <div style={{ fontSize: '2rem', fontWeight: '700', color: '#1e3a5f' }}>{stats.pending_invoices}</div>
@@ -772,18 +746,6 @@ function InventoryManagement({ userEmail }) {
             <p style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
               No vendors found. Click "Add Vendor" to create your first vendor.
             </p>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'counts' && (
-        <div>
-          <h2 style={{ marginBottom: '1.5rem' }}>Counts</h2>
-          <p style={{ color: '#666' }}>Count management interface coming soon...</p>
-          {counts.length > 0 && (
-            <div>
-              <p>Found {counts.length} count session(s)</p>
-            </div>
           )}
         </div>
       )}

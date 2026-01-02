@@ -12,17 +12,14 @@ export default function PeriodAnalyticsTab({ userEmail }) {
   const [closeFormData, setCloseFormData] = useState({
     period_start: '',
     period_end: '',
-    location_id: '',
-    closing_count_id: ''
+    location_id: ''
   });
   const [locations, setLocations] = useState([]);
-  const [counts, setCounts] = useState([]);
 
   useEffect(() => {
     if (userEmail) {
       loadPeriods();
       loadLocations();
-      loadCounts();
     }
   }, [userEmail]);
 
@@ -46,15 +43,6 @@ export default function PeriodAnalyticsTab({ userEmail }) {
       setLocations(data);
     } catch (err) {
       console.error('Error loading locations:', err);
-    }
-  };
-
-  const loadCounts = async () => {
-    try {
-      const data = await inventoryApi.getCounts(userEmail);
-      setCounts(data.filter(c => c.status === 'POSTED' || c.status === 'SUBMITTED'));
-    } catch (err) {
-      console.error('Error loading counts:', err);
     }
   };
 
@@ -85,11 +73,10 @@ export default function PeriodAnalyticsTab({ userEmail }) {
       await inventoryApi.closePeriod({
         period_start: closeFormData.period_start,
         period_end: closeFormData.period_end,
-        location_id: closeFormData.location_id || null,
-        closing_count_id: closeFormData.closing_count_id || null
+        location_id: closeFormData.location_id || null
       }, userEmail);
       setShowCloseModal(false);
-      setCloseFormData({ period_start: '', period_end: '', location_id: '', closing_count_id: '' });
+      setCloseFormData({ period_start: '', period_end: '', location_id: '' });
       await loadPeriods();
     } catch (err) {
       console.error('Error closing period:', err);
@@ -131,8 +118,7 @@ export default function PeriodAnalyticsTab({ userEmail }) {
             setCloseFormData({
               period_start: firstDay.toISOString().split('T')[0],
               period_end: lastDay.toISOString().split('T')[0],
-              location_id: '',
-              closing_count_id: ''
+              location_id: ''
             });
             setShowCloseModal(true);
           }}
@@ -349,29 +335,6 @@ export default function PeriodAnalyticsTab({ userEmail }) {
                   <option value="">All Locations</option>
                   {locations.map(loc => (
                     <option key={loc.id} value={loc.id}>{loc.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', fontWeight: '600' }}>
-                  Closing Count (optional)
-                </label>
-                <select
-                  value={closeFormData.closing_count_id}
-                  onChange={(e) => setCloseFormData({ ...closeFormData, closing_count_id: e.target.value })}
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    border: '1px solid #e0e0e0',
-                    borderRadius: '6px',
-                    fontSize: '0.9rem'
-                  }}
-                >
-                  <option value="">None</option>
-                  {counts.map(count => (
-                    <option key={count.id} value={count.id}>
-                      {count.name} ({count.status})
-                    </option>
                   ))}
                 </select>
               </div>

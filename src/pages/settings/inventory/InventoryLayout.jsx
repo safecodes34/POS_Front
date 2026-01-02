@@ -5,7 +5,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 const mainTabs = [
   { id: 'overview', label: 'Home', path: '/settings/inventory/overview' },
   { id: 'receiving', label: 'Receive', path: '/settings/inventory/receiving' },
-  { id: 'counts', label: 'Count', path: '/settings/inventory/counts' },
   { id: 'ordering', label: 'Reorder', path: '/settings/inventory/ordering' },
   { id: 'catalog', label: 'Catalog', path: '/settings/inventory/catalog' }
 ];

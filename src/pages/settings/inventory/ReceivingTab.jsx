@@ -319,9 +319,19 @@ function InvoiceDetailDrawer({ invoice, userEmail, onClose, onRefresh }) {
       <div style={{ marginBottom: '1.5rem' }}>
         <h3>Lines</h3>
         {invoice.lines && invoice.lines.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <div style={{ 
+            maxHeight: '500px', 
+            minHeight: '200px',
+            overflowY: 'auto', 
+            overflowX: 'hidden',
+            paddingRight: '0.5rem',
+            display: 'flex', 
+            flexDirection: 'column', 
+            gap: '0.5rem',
+            WebkitOverflowScrolling: 'touch'
+          }}>
             {invoice.lines.map(line => (
-              <div key={line.id} style={{ padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
+              <div key={line.id} style={{ padding: '1rem', backgroundColor: '#f8f9fa', borderRadius: '4px', flexShrink: 0 }}>
                 <div><strong>{line.description}</strong></div>
                 <div>Qty: {line.qty} {line.uom} @ ${line.unit_cost} = ${(line.qty * line.unit_cost).toFixed(2)}</div>
                 <div>Mapped to: {line.mapped_item_name || 'Not mapped'}</div>
