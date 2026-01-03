@@ -325,6 +325,7 @@ function InvoiceDetailDrawer({ invoice, userEmail, onClose, onRefresh }) {
             overflowY: 'auto', 
             overflowX: 'hidden',
             paddingRight: '0.5rem',
+            paddingBottom: '80px',
             display: 'flex', 
             flexDirection: 'column', 
             gap: '0.5rem',

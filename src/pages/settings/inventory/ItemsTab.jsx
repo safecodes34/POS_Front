@@ -88,7 +88,7 @@ export default function ItemsTab({ userEmail }) {
         }
         
         // Calculate available height: viewport - footer - content top position - some padding
-        const availableHeight = viewportHeight - footerHeight - contentTop - 20; // 20px padding
+        const availableHeight = viewportHeight - footerHeight - contentTop - 60; // 60px padding for better visibility
         
         // Get the height of elements above the table (filters, error display, etc.)
         let elementsAboveTable = 0;
@@ -324,7 +324,8 @@ export default function ItemsTab({ userEmail }) {
           style={{ 
             overflowX: 'auto',
             overflowY: tableMaxHeight ? 'auto' : 'visible',
-            maxHeight: tableMaxHeight ? `${tableMaxHeight}px` : 'none'
+            maxHeight: tableMaxHeight ? `${tableMaxHeight}px` : 'none',
+            paddingBottom: tableMaxHeight ? '80px' : '0'
           }}
         >
           <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', borderRadius: '8px', overflow: 'hidden' }}>

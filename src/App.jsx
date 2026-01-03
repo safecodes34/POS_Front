@@ -89,7 +89,9 @@ const getBackendUrl = () => {
 
 const BACKEND_BASE_URL = getBackendUrl()
 const API_BASE_URL = `${BACKEND_BASE_URL}/api`
-const IMAGE_BASE_URL = import.meta.env.VITE_IMAGE_BASE_URL || BACKEND_BASE_URL
+// Always use BACKEND_BASE_URL for images to ensure consistency with API calls
+// Only use VITE_IMAGE_BASE_URL if explicitly set and we're in production
+const IMAGE_BASE_URL = (import.meta.env.VITE_IMAGE_BASE_URL && isProduction) ? import.meta.env.VITE_IMAGE_BASE_URL : BACKEND_BASE_URL
 
 // Log for debugging
 if (typeof window !== 'undefined') {
@@ -106,12 +108,36 @@ if (typeof window !== 'undefined') {
   
   // Test backend connection on app load
   const testBackendConnection = async () => {
+    const isLocalDev = !isProduction && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    
+    // Try HTTPS first
     try {
       const healthUrl = `${BACKEND_BASE_URL}/api/health`
       console.log('🔍 Testing backend connection to:', healthUrl)
       const response = await axios.get(healthUrl, { timeout: 5000 })
       console.log('✅ Backend connection successful!', response.data)
+      return
     } catch (error) {
+      // In local development, try HTTP as fallback if HTTPS fails
+      if (isLocalDev && (error.code === 'ERR_NETWORK' || error.code === 'ECONNREFUSED' || error.code === 'ECONNRESET')) {
+        const httpUrl = BACKEND_BASE_URL.replace('https://', 'http://')
+        console.log('⚠️  HTTPS failed, trying HTTP fallback:', httpUrl)
+        try {
+          const response = await axios.get(`${httpUrl}/api/health`, { timeout: 5000 })
+          console.log('✅ Backend connection successful via HTTP!', response.data)
+          console.warn('⚠️  Backend is running on HTTP (no SSL certificates). Consider running .\\setup.ps1 to generate certificates.')
+          return
+        } catch (httpError) {
+          console.error('❌ Both HTTPS and HTTP connection attempts failed!')
+          console.error('   🔌 Connection Error:')
+          console.error('   👉 Make sure backend is running: cd Back && npm start')
+          console.error(`   👉 Test backend directly: ${BACKEND_BASE_URL}/api/health`)
+          console.error(`   👉 Or try HTTP: ${httpUrl}/api/health`)
+          return
+        }
+      }
+      
+      // Handle other errors
       console.error('❌ Backend connection test failed!')
       if (error.code === 'ERR_CERT_AUTHORITY_INVALID' || error.code === 'ERR_CERT_COMMON_NAME_INVALID') {
         console.error('   🔒 SSL Certificate Error:')
@@ -121,6 +147,10 @@ if (typeof window !== 'undefined') {
         console.error('   🔌 Connection Error:')
         console.error('   👉 Make sure backend is running: cd Back && npm start')
         console.error(`   👉 Test backend directly: ${BACKEND_BASE_URL}/api/health`)
+        if (isLocalDev) {
+          const httpUrl = BACKEND_BASE_URL.replace('https://', 'http://')
+          console.error(`   👉 Or try HTTP: ${httpUrl}/api/health`)
+        }
       } else {
         console.error('   Error:', error.message)
         console.error(`   👉 Test backend directly: ${BACKEND_BASE_URL}/api/health`)
@@ -198,10 +228,15 @@ const getImageUrl = (image) => {
   if (image.startsWith('http') || image.startsWith('blob:')) return image
   if (image.startsWith('/uploads/')) {
     const fullUrl = `${IMAGE_BASE_URL}${image}`
-    console.log('Constructed image URL:', fullUrl, 'from path:', image)
     return fullUrl
   }
-  return image
+  // If image is just a filename (doesn't start with /), prepend /uploads/
+  if (!image.startsWith('/')) {
+    const fullUrl = `${IMAGE_BASE_URL}/uploads/${image}`
+    return fullUrl
+  }
+  // If it starts with / but not /uploads/, assume it's a path and prepend base URL
+  return `${IMAGE_BASE_URL}${image}`
 }
 
 // Payment Form Component using Stripe Payment Element
@@ -612,6 +647,7 @@ function App() {
   const [products, setProducts] = useState([])
   const [editingProductId, setEditingProductId] = useState(null)
   const [editFormData, setEditFormData] = useState({ name: '', price: '', image: null, imagePreview: null, toppings: [], ingredients: [] })
+  const [isProcessingImage, setIsProcessingImage] = useState(false)
   const [newTopping, setNewTopping] = useState('')
   const [newToppingPrice, setNewToppingPrice] = useState('')
   const [ingredientsText, setIngredientsText] = useState('')
@@ -802,6 +838,12 @@ function App() {
   const [transactions, setTransactions] = useState([])
   const [selectedTransaction, setSelectedTransaction] = useState(null)
   const [transactionSearchQuery, setTransactionSearchQuery] = useState('')
+  const [isRefundModalOpen, setIsRefundModalOpen] = useState(false)
+  const [transactionForRefund, setTransactionForRefund] = useState(null) // Store transaction for refund modal
+  const [refundType, setRefundType] = useState(null) // 'full' or 'partial'
+  const [partialRefundMode, setPartialRefundMode] = useState(null) // 'item' or 'amount'
+  const [selectedRefundItemIndex, setSelectedRefundItemIndex] = useState(null)
+  const [refundAmount, setRefundAmount] = useState('')
   
   // Settings state
   const [settings, setSettings] = useState(() => {
@@ -1145,30 +1187,76 @@ function App() {
 
   // Handle refund transaction
   const handleRefundTransaction = async () => {
-    if (!selectedTransaction) return
-    
-    // Confirm refund action
-    const confirmRefund = window.confirm(
-      `Are you sure you want to refund this transaction?\n\n` +
-      `Customer: ${selectedTransaction.customerName}\n` +
-      `Amount: $${(selectedTransaction.total || 0).toFixed(2)}\n\n` +
-      `This action cannot be undone.`
-    )
-    
-    if (!confirmRefund) return
+    const transaction = transactionForRefund || selectedTransaction
+    if (!transaction) return
     
     if (!currentUser || !currentUser.email) {
       alert('You must be logged in to process refunds.')
       return
     }
+
+    // Prepare refund payload
+    let refundPayload = {
+      userEmail: currentUser.email,
+      refundType: refundType
+    }
+
+    if (refundType === 'partial') {
+      if (partialRefundMode === 'item') {
+        if (selectedRefundItemIndex === null || selectedRefundItemIndex === undefined) {
+          alert('Please select an item to refund.')
+          return
+        }
+        refundPayload.partialRefund = {
+          type: 'item',
+          itemIndex: selectedRefundItemIndex
+        }
+      } else if (partialRefundMode === 'amount') {
+        const amount = parseFloat(refundAmount)
+        if (isNaN(amount) || amount <= 0) {
+          alert('Please enter a valid refund amount.')
+          return
+        }
+        if (amount > transaction.total) {
+          alert(`Refund amount cannot exceed the transaction total of $${transaction.total.toFixed(2)}`)
+          return
+        }
+        refundPayload.partialRefund = {
+          type: 'amount',
+          amount: amount
+        }
+      } else {
+        alert('Please select a partial refund type (item or amount).')
+        return
+      }
+    }
+    
+    // Confirm refund action
+    let confirmMessage = `Are you sure you want to ${refundType === 'full' ? 'fully' : 'partially'} refund this transaction?\n\n`
+    confirmMessage += `Customer: ${transaction.customerName}\n`
+    
+    if (refundType === 'full') {
+      confirmMessage += `Amount: $${(transaction.total || 0).toFixed(2)}\n`
+    } else if (partialRefundMode === 'item') {
+      const item = transaction.items[selectedRefundItemIndex]
+      const itemTotal = (item.price || 0) * (item.quantity || 0)
+      confirmMessage += `Item: ${item.quantity}x ${item.name}\n`
+      confirmMessage += `Amount: $${itemTotal.toFixed(2)}\n`
+    } else if (partialRefundMode === 'amount') {
+      confirmMessage += `Amount: $${parseFloat(refundAmount).toFixed(2)}\n`
+    }
+    
+    confirmMessage += `\nThis action cannot be undone.`
+    
+    const confirmRefund = window.confirm(confirmMessage)
+    
+    if (!confirmRefund) return
     
     try {
       // Call refund endpoint
       const response = await axios.post(
-        `${API_BASE_URL}/transactions/${selectedTransaction.id}/refund`,
-        {
-          userEmail: currentUser.email
-        },
+        `${API_BASE_URL}/transactions/${transaction.id}/refund`,
+        refundPayload,
         {
           headers: {
             'Content-Type': 'application/json'
@@ -1182,8 +1270,14 @@ function App() {
       // Reload transactions to reflect the refund
       await loadTransactionsFromBackend()
       
-      // Close the modal
+      // Close the modals and reset state
+      setIsRefundModalOpen(false)
       setSelectedTransaction(null)
+      setTransactionForRefund(null)
+      setRefundType(null)
+      setPartialRefundMode(null)
+      setSelectedRefundItemIndex(null)
+      setRefundAmount('')
       
       alert('Transaction refunded successfully.')
     } catch (error) {
@@ -1224,6 +1318,7 @@ function App() {
         })
         
         // Clean up any blob URLs from products (they're temporary and invalid)
+        // But preserve existing images in state that might not be in backend yet
         const cleanedProducts = response.data.map(product => {
           if (product.image && product.image.startsWith('blob:')) {
             console.warn(`Removing invalid blob URL from product ${product.id}:`, product.image)
@@ -1231,9 +1326,49 @@ function App() {
           }
           return product
         })
-        setProducts(cleanedProducts)
-        // Save to localStorage as backup
-        localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(cleanedProducts))
+        
+        // Merge with existing products to preserve images that were just uploaded
+        // This prevents losing images during reload
+        setProducts(prev => {
+          const merged = cleanedProducts.map(backendProduct => {
+            const existingProduct = prev.find(p => p.id === backendProduct.id)
+            // If existing product has a valid image (not blob) and backend product doesn't, keep the existing one
+            // This handles the case where image was just uploaded but backend hasn't synced yet
+            if (existingProduct && existingProduct.image && !existingProduct.image.startsWith('blob:') && 
+                (!backendProduct.image || backendProduct.image === null || backendProduct.image === '')) {
+              console.log(`🔄 Preserving existing image for product ${backendProduct.id}:`, existingProduct.image)
+              return { ...backendProduct, image: existingProduct.image }
+            }
+            // Prefer backend product image if it exists (it's the source of truth)
+            if (backendProduct.image && !backendProduct.image.startsWith('blob:')) {
+              console.log(`✅ Using backend image for product ${backendProduct.id}:`, backendProduct.image)
+              return backendProduct
+            }
+            // If backend product has no image but existing does, preserve existing
+            if (!backendProduct.image && existingProduct?.image && !existingProduct.image.startsWith('blob:')) {
+              console.log(`🔄 Backend missing image, preserving existing for product ${backendProduct.id}:`, existingProduct.image)
+              return { ...backendProduct, image: existingProduct.image }
+            }
+            // Otherwise, use backend product as-is
+            return backendProduct
+          })
+          
+          // Add any products that exist in prev but not in backend (shouldn't happen, but just in case)
+          const prevIds = new Set(cleanedProducts.map(p => p.id))
+          const missingProducts = prev.filter(p => !prevIds.has(p.id))
+          const finalProducts = [...merged, ...missingProducts]
+          
+          // Save to localStorage (remove blob URLs)
+          const productsToSave = finalProducts.map(p => {
+            if (p.image && p.image.startsWith('blob:')) {
+              return { ...p, image: null }
+            }
+            return p
+          })
+          localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(productsToSave))
+          
+          return finalProducts
+        })
         console.log('✅ Products state updated with', cleanedProducts.length, 'products')
         console.log('✅ Current selectedCategory:', selectedCategory)
         console.log('✅ Products matching selectedCategory:', cleanedProducts.filter(p => p.category === selectedCategory).map(p => p.name))
@@ -1523,6 +1658,20 @@ function App() {
       })
     }
   }, [location.pathname])
+
+  // Clean up transaction modal states when navigating away from Transaction view
+  useEffect(() => {
+    if (activeView !== 'Transaction') {
+      // Clear all transaction-related modal states when not on Transaction view
+      setSelectedTransaction(null)
+      setIsRefundModalOpen(false)
+      setTransactionForRefund(null)
+      setRefundType(null)
+      setPartialRefundMode(null)
+      setSelectedRefundItemIndex(null)
+      setRefundAmount('')
+    }
+  }, [activeView])
 
   // Persist activeView to localStorage and URL pathname
   // IMPORTANT: This effect should NOT override the URL on initial load/reload
@@ -5568,28 +5717,49 @@ function App() {
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0)
 
   const startEditing = (product) => {
-    setEditingProductId(product.id)
-    setIsAddingProduct(false)
-    setEditFormData({
-      name: product.name,
-      price: product.price.toString(),
-      image: null,
-      imagePreview: getImageUrl(product.image) || null,
-      removeImage: false,
-      toppings: (product.toppings || []).map(t => typeof t === 'string' ? { name: t, price: 0, halfSameAsBase: false, preSelected: false, hasPortions: true, hasHalf: true, hasDouble: true } : { ...t, halfSameAsBase: t.halfSameAsBase || false, preSelected: t.preSelected || false, hasPortions: t.hasPortions !== undefined ? t.hasPortions : true, hasHalf: t.hasHalf !== undefined ? t.hasHalf : (t.hasPortions !== undefined ? t.hasPortions : true), hasDouble: t.hasDouble !== undefined ? t.hasDouble : (t.hasPortions !== undefined ? t.hasPortions : true), halfPrice: t.halfPrice, doublePrice: t.doublePrice }),
-      ingredients: product.ingredients || []
+    // Get the latest product data from state to ensure we have the most up-to-date image
+    const latestProduct = products.find(p => p.id === product.id) || product
+    
+    // Log product image state for debugging
+    console.log('📝 Opening edit modal for product:', {
+      productId: latestProduct.id,
+      productName: latestProduct.name,
+      productImage: latestProduct.image,
+      originalProductImage: product.image,
+      imageUrl: latestProduct.image ? getImageUrl(latestProduct.image) : null,
+      hasImage: !!latestProduct.image
     })
-    setProductSection(product.category || (categories.filter(cat => cat !== 'All')[0] || ''))
+    
+    // Use the latest product data, especially for the image
+    const imagePreview = latestProduct.image ? getImageUrl(latestProduct.image) : null
+    
+    setEditingProductId(latestProduct.id)
+    setIsAddingProduct(false)
+    setIsProcessingImage(false)
+    setEditFormData({
+      name: latestProduct.name,
+      price: latestProduct.price.toString(),
+      image: null, // Don't set the File object - we'll use imagePreview for display
+      imagePreview: imagePreview,
+      removeImage: false,
+      toppings: (latestProduct.toppings || []).map(t => typeof t === 'string' ? { name: t, price: 0, halfSameAsBase: false, preSelected: false, hasPortions: true, hasHalf: true, hasDouble: true } : { ...t, halfSameAsBase: t.halfSameAsBase || false, preSelected: t.preSelected || false, hasPortions: t.hasPortions !== undefined ? t.hasPortions : true, hasHalf: t.hasHalf !== undefined ? t.hasHalf : (t.hasPortions !== undefined ? t.hasPortions : true), hasDouble: t.hasDouble !== undefined ? t.hasDouble : (t.hasPortions !== undefined ? t.hasPortions : true), halfPrice: t.halfPrice, doublePrice: t.doublePrice }),
+      ingredients: latestProduct.ingredients || []
+    })
+    setProductSection(latestProduct.category || (categories.filter(cat => cat !== 'All')[0] || ''))
     setNewTopping('')
     setNewToppingPrice('')
-    setIngredientsText((product.ingredients || []).join('\n'))
+    setIngredientsText((latestProduct.ingredients || []).join('\n'))
     setActiveEditSection('details')
     setIsEditModalOpen(true)
+    
+    // Log what was set in the modal
+    console.log('✅ Edit modal initialized with imagePreview:', imagePreview)
   }
 
   const startAddingProduct = () => {
     setEditingProductId(null)
     setIsAddingProduct(true)
+    setIsProcessingImage(false)
     setEditFormData({
       name: '',
       price: '',
@@ -5617,6 +5787,7 @@ function App() {
     }
     setEditingProductId(null)
     setIsAddingProduct(false)
+    setIsProcessingImage(false)
     setEditFormData({ name: '', price: '', image: null, imagePreview: null, removeImage: false, toppings: [], ingredients: [] })
     setProductSection('')
     setNewTopping('')
@@ -5629,12 +5800,25 @@ function App() {
     const file = e.target.files[0]
     if (!file) return
 
+    // Show immediate feedback by creating a preview from the original file first
+    const immediatePreview = URL.createObjectURL(file)
+    setIsProcessingImage(true)
+    setEditFormData(prev => ({
+      ...prev,
+      image: file,
+      imagePreview: immediatePreview,
+      removeImage: false
+    }))
+
     // Target size for square product images (matches the square aspect-ratio container)
     const TARGET_SIZE = 500
 
     try {
       // Process the image: create square with centered product and white background
       const processedBlob = await processProductImage(file, TARGET_SIZE)
+      
+      // Clean up the immediate preview
+      URL.revokeObjectURL(immediatePreview)
       
       // Create a new File object from the processed blob
       const processedFile = new File([processedBlob], file.name.replace(/\.[^.]+$/, '.jpg'), {
@@ -5647,15 +5831,12 @@ function App() {
         imagePreview: URL.createObjectURL(processedBlob),
         removeImage: false
       }))
+      setIsProcessingImage(false)
     } catch (error) {
       console.error('Error processing image:', error)
-      // Fallback to original file if processing fails
-      setEditFormData(prev => ({
-        ...prev,
-        image: file,
-        imagePreview: URL.createObjectURL(file),
-        removeImage: false
-      }))
+      // Keep the immediate preview if processing fails
+      setIsProcessingImage(false)
+      // The imagePreview is already set above, so it will show the original file
     }
   }
 
@@ -5746,6 +5927,7 @@ function App() {
       })
       URL.revokeObjectURL(editFormData.imagePreview)
     }
+    setIsProcessingImage(false)
     setEditFormData(prev => ({
       ...prev,
       image: null,
@@ -6076,6 +6258,24 @@ function App() {
             savedProduct = response.data
             console.log('✅ Product saved successfully:', savedProduct)
             console.log('✅ Image path from backend:', savedProduct?.image)
+            console.log('✅ Full image URL will be:', savedProduct?.image ? getImageUrl(savedProduct.image) : 'NO IMAGE')
+            
+            // CRITICAL: Verify the image path is correct
+            if (savedProduct?.image) {
+              const constructedUrl = getImageUrl(savedProduct.image)
+              console.log('🔍 Image URL verification:', {
+                imagePath: savedProduct.image,
+                constructedUrl: constructedUrl,
+                imageBaseUrl: IMAGE_BASE_URL,
+                backendBaseUrl: BACKEND_BASE_URL,
+                willLoadFrom: constructedUrl
+              })
+            } else {
+              console.error('❌❌❌ CRITICAL: Backend did not return image path!', {
+                savedProduct: savedProduct,
+                hasImage: !!savedProduct?.image
+              })
+            }
           } else {
             throw new Error(`Upload failed with status ${response.status}: ${JSON.stringify(response.data)}`)
           }
@@ -6187,6 +6387,12 @@ function App() {
         }
       }
 
+      // Handle case where all retry attempts failed
+      if (!savedProduct) {
+        console.warn('⚠️ All retry attempts failed - product will be updated locally with blob URL if available, but image will not persist after page reload')
+        // Continue with state update using blob URL fallback (handled in the map below)
+      }
+      
       // Update product in state
       // If we created a new product (404 -> POST), reload from backend
       if (savedProduct && savedProduct.id !== productId) {
@@ -6217,14 +6423,26 @@ function App() {
         return
       }
       
+      // Log savedProduct state for debugging
+      const backendImagePath = savedProduct?.image
+      console.log('🔍 savedProduct state before update:', {
+        savedProductExists: !!savedProduct,
+        savedProductId: savedProduct?.id,
+        savedProductImage: savedProduct?.image,
+        backendImagePath: backendImagePath,
+        savedProductImageType: typeof savedProduct?.image,
+        hasImageUpload: !!editFormData.image,
+        imagePreview: editFormData.imagePreview,
+        removeImage: editFormData.removeImage
+      })
+      
       const updatedProducts = products.map(p => {
         if (p.id === productId) {
-          // Determine the image to use:
-          // 1. If image was removed, set to null
-          // 2. If backend returned a valid image path (non-null, non-blob), use it (highest priority)
-          // 3. If a new image was uploaded (has blob URL in imagePreview), use it
-          // 4. If imagePreview exists and is not a blob (existing image), use it
-          // 5. Otherwise, keep the existing image (but never use old blob URLs - they're temporary)
+          // Determine the image to use - SIMPLIFIED LOGIC:
+          // Priority 1: If image was removed, set to null
+          // Priority 2: If savedProduct exists and has a valid image path, ALWAYS use it (backend is source of truth)
+          // Priority 3: If new image was uploaded but backend failed, use blob URL temporarily
+          // Priority 4: Keep existing image if it's valid
           let imageToUse = null
           
           if (editFormData.removeImage) {
@@ -6238,71 +6456,60 @@ function App() {
               })
               URL.revokeObjectURL(editFormData.imagePreview)
             }
-          } else if (savedProduct?.image !== undefined && savedProduct.image !== null && savedProduct.image !== '' && !savedProduct.image.startsWith('blob:')) {
-            // Backend returned a valid image path (not a blob, not empty) - ALWAYS use it for persistence
-            imageToUse = savedProduct.image
-            console.log('✅ Using PERSISTENT image from backend:', imageToUse)
-            console.log('✅ Full image URL:', getImageUrl(imageToUse))
-            console.log('✅ This image will persist after page refresh!')
-            // Clear failed images for this product so it can try loading again
-            setFailedImages(prev => {
-              const newSet = new Set(prev)
-              newSet.delete(productId)
-              return newSet
-            })
-            // Clean up blob URL if it exists and remove from pending
-            if (editFormData.imagePreview && editFormData.imagePreview.startsWith('blob:')) {
-              setPendingBlobUrls(prev => {
+          } else if (savedProduct && savedProduct.image) {
+            // CRITICAL: If savedProduct exists and has an image, use it directly (backend is source of truth)
+            const imgPath = savedProduct.image
+            if (typeof imgPath === 'string' && imgPath.trim() !== '' && !imgPath.startsWith('blob:')) {
+              imageToUse = imgPath.trim()
+              console.log('✅✅✅ DIRECT: Using image from savedProduct:', imageToUse)
+              console.log('✅✅✅ Full URL:', getImageUrl(imageToUse))
+              
+              // Clear failed images so it can display
+              setFailedImages(prev => {
                 const newSet = new Set(prev)
-                newSet.delete(editFormData.imagePreview)
+                newSet.delete(productId)
                 return newSet
               })
-              URL.revokeObjectURL(editFormData.imagePreview)
-            }
-          } else if (editFormData.image && editFormData.imagePreview && editFormData.imagePreview.startsWith('blob:')) {
-            // Image was uploaded (new file) - use blob URL for immediate display
-            // This happens when backend failed or hasn't returned a path yet
-            imageToUse = editFormData.imagePreview
-            console.log('📸 Using blob URL for immediate display:', imageToUse)
-            console.log('📸 Backend failed or returned no image path, using temporary blob URL')
-            // IMPORTANT: Mark blob URL as pending and clear failedImages BEFORE updating product
-            // This ensures the image will render immediately
-            setPendingBlobUrls(prev => {
-              const newSet = new Set(prev)
-              newSet.add(editFormData.imagePreview)
-              console.log('📝 Added blob URL to pending:', editFormData.imagePreview, 'Total pending:', newSet.size)
-              return newSet
-            })
-            // Clear from failed images so it can display immediately
-            setFailedImages(prev => {
-              const newSet = new Set(prev)
-              newSet.delete(productId)
-              console.log('🧹 Cleared failedImages for product', productId)
-              return newSet
-            })
-          } else if (editFormData.imagePreview && !editFormData.imagePreview.startsWith('blob:')) {
-            // Existing image URL (not a blob) - preserve it
-            imageToUse = editFormData.imagePreview
-            console.log('📸 Using existing image URL:', imageToUse)
-          } else {
-            // No new image uploaded, keep existing image if it's not a blob URL
-            if (p.image && !p.image.startsWith('blob:')) {
-              imageToUse = p.image
-            } else if (p.image && p.image.startsWith('blob:') && pendingBlobUrls.has(p.image)) {
-              // Keep pending blob URLs
-              imageToUse = p.image
-            } else {
-              // Clean up old blob URLs
-              if (p.image && p.image.startsWith('blob:')) {
-                console.warn('Removing old blob URL from product:', p.image)
-                try {
-                  URL.revokeObjectURL(p.image)
-                } catch (e) {
-                  // Ignore errors
-                }
+              
+              // Clean up blob URL if it exists
+              if (editFormData.imagePreview && editFormData.imagePreview.startsWith('blob:')) {
+                setPendingBlobUrls(prev => {
+                  const newSet = new Set(prev)
+                  newSet.delete(editFormData.imagePreview)
+                  return newSet
+                })
+                URL.revokeObjectURL(editFormData.imagePreview)
               }
+            } else {
+              console.warn('⚠️ savedProduct.image exists but is invalid:', imgPath)
+              // Fall through to next conditions
               imageToUse = null
             }
+          }
+          
+          // If we don't have an image yet, check other sources
+          if (!imageToUse) {
+            if (editFormData.image && editFormData.imagePreview && editFormData.imagePreview.startsWith('blob:')) {
+              // New image uploaded but backend didn't return it - use blob URL temporarily
+              imageToUse = editFormData.imagePreview
+              console.warn('⚠️ Using blob URL fallback - backend may have failed:', imageToUse)
+              setPendingBlobUrls(prev => new Set(prev).add(editFormData.imagePreview))
+              setFailedImages(prev => {
+                const newSet = new Set(prev)
+                newSet.delete(productId)
+                return newSet
+              })
+            } else if (p.image && !p.image.startsWith('blob:')) {
+              // Keep existing valid image
+              imageToUse = p.image
+              console.log('📸 Keeping existing image:', imageToUse)
+            }
+          }
+          
+          // FINAL SAFETY CHECK: If savedProduct has an image but imageToUse is still null, use savedProduct.image
+          if (!imageToUse && savedProduct?.image && typeof savedProduct.image === 'string' && savedProduct.image.trim() !== '' && !savedProduct.image.startsWith('blob:')) {
+            imageToUse = savedProduct.image.trim()
+            console.log('🔧🔧🔧 FINAL SAFETY: Setting imageToUse from savedProduct:', imageToUse)
           }
           
           // ALWAYS use productSection (user's dropdown selection) - this is the source of truth
@@ -6319,9 +6526,17 @@ function App() {
             name: editFormData.name,
             price: parseFloat(editFormData.price),
             category: finalCategory,
-            image: imageToUse,
+            image: imageToUse, // This MUST be set for the image to display
             toppings: editFormData.toppings || [],
             ingredients: ingredientsArray
+          }
+          
+          // VERIFY: Log if image is missing when it shouldn't be
+          if (!updated.image && savedProduct?.image && !savedProduct.image.startsWith('blob:')) {
+            console.error('❌❌❌ CRITICAL ERROR: updated.image is null but savedProduct has image!', {
+              updatedImage: updated.image,
+              savedProductImage: savedProduct.image
+            })
           }
           console.log('🔄 Updated product category:', finalCategory, '(savedProduct.category:', savedProduct?.category, ', productSection:', productSection, ', original category:', p.category, ')')
           console.log('🔄 Updated product:', {
@@ -6329,16 +6544,35 @@ function App() {
             name: updated.name,
             image: updated.image,
             imageUrl: getImageUrl(updated.image),
-            hasImage: !!updated.image
+            hasImage: !!updated.image,
+            imageBaseUrl: IMAGE_BASE_URL,
+            backendBaseUrl: BACKEND_BASE_URL,
+            imageSource: imageToUse === savedProduct?.image ? 'backend' : (imageToUse?.startsWith('blob:') ? 'blob-url' : (imageToUse === p.image ? 'existing' : 'other'))
           })
           
+          // Verify image URL is correct
+          if (updated.image && !updated.image.startsWith('blob:')) {
+            const constructedUrl = getImageUrl(updated.image)
+            console.log('🔍 Image URL verification:', {
+              imagePath: updated.image,
+              constructedUrl: constructedUrl,
+              imageBaseUrl: IMAGE_BASE_URL,
+              willBeServedFrom: `${IMAGE_BASE_URL}${updated.image}`
+            })
+          }
+          
           // Clear from failed images if product has an image, so it can try loading again
-          // This is already handled above for blob URLs, but ensure it's cleared for all images
-          if (imageToUse) {
+          // This is already handled above for persistent images, but ensure it's cleared for all images
+          if (imageToUse && !imageToUse.startsWith('blob:')) {
+            // For persistent images, ensure they're not marked as failed
             setFailedImages(prev => {
-              const newSet = new Set(prev)
-              newSet.delete(productId)
-              return newSet
+              if (prev.has(productId)) {
+                const newSet = new Set(prev)
+                newSet.delete(productId)
+                console.log('🧹 Cleared failedImages for persistent image on product', productId)
+                return newSet
+              }
+              return prev
             })
           }
           
@@ -6347,27 +6581,129 @@ function App() {
         return p
       })
       
-      // Reload products from backend to ensure consistency
-      const reloaded = await reloadProductsFromBackend()
-      if (!reloaded) {
-        // If reload failed, update state manually
-        setProducts(updatedProducts)
-        
-        // Save to localStorage for persistence (especially important if backend fails)
-        // Only save if we have a valid image path (not a blob URL)
-        const productsToSave = updatedProducts.map(p => {
-          // Remove blob URLs from localStorage - they're temporary
-          if (p.image && p.image.startsWith('blob:')) {
-            return { ...p, image: null }
-          }
-          return p
-        })
-        try {
-          localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(productsToSave))
-          console.log('💾 Products saved to localStorage for persistence')
-        } catch (error) {
-          console.error('Error saving products to localStorage:', error)
+      // Update state immediately with the updated product (don't wait for reload)
+      // This ensures the image appears immediately in the UI
+      const updatedProduct = updatedProducts.find(p => p.id === productId)
+      
+      // CRITICAL: ALWAYS use savedProduct.image if it exists and is valid (backend is source of truth)
+      let finalImage = updatedProduct?.image
+      if (savedProduct?.image && typeof savedProduct.image === 'string' && savedProduct.image.trim() !== '' && !savedProduct.image.startsWith('blob:')) {
+        finalImage = savedProduct.image.trim()
+        if (updatedProduct?.image !== finalImage) {
+          console.log('🔧🔧🔧 OVERRIDING: Using savedProduct.image instead of updatedProduct.image:', {
+            updatedProductImage: updatedProduct?.image,
+            savedProductImage: savedProduct.image,
+            finalImage: finalImage
+          })
         }
+      }
+      
+      // Create final updated product with correct image
+      const finalUpdatedProduct = finalImage !== updatedProduct?.image 
+        ? { ...updatedProduct, image: finalImage }
+        : updatedProduct
+      
+      const finalUpdatedProducts = updatedProducts.map(p => p.id === productId ? finalUpdatedProduct : p)
+      
+      console.log('🔄 Updating products state:', {
+        productId: productId,
+        productName: finalUpdatedProduct?.name,
+        image: finalUpdatedProduct?.image,
+        imageUrl: finalUpdatedProduct?.image ? getImageUrl(finalUpdatedProduct.image) : null,
+        hasImage: !!finalUpdatedProduct?.image,
+        imageType: typeof finalUpdatedProduct?.image,
+        imageLength: finalUpdatedProduct?.image?.length,
+        savedProductImage: savedProduct?.image,
+        backendImagePath: backendImagePath,
+        IMAGE_BASE_URL: IMAGE_BASE_URL
+      })
+      
+      setProducts(finalUpdatedProducts)
+      
+      // Force a re-render by updating state again (React may batch updates)
+      // This ensures the image displays immediately
+      setTimeout(() => {
+        setProducts(prev => {
+          const product = prev.find(p => p.id === productId)
+          if (product && product.image) {
+            console.log('✅ Product state after update - image should be visible:', {
+              productId: product.id,
+              image: product.image,
+              imageUrl: getImageUrl(product.image)
+            })
+          }
+          return prev
+        })
+      }, 100)
+      
+      // Save to localStorage for persistence
+      // Only save if we have a valid image path (not a blob URL)
+      const productsToSave = updatedProducts.map(p => {
+        // Remove blob URLs from localStorage - they're temporary
+        if (p.image && p.image.startsWith('blob:')) {
+          return { ...p, image: null }
+        }
+        return p
+      })
+      try {
+        localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(productsToSave))
+        console.log('💾 Products saved to localStorage for persistence')
+      } catch (error) {
+        console.error('Error saving products to localStorage:', error)
+      }
+      
+      // Only reload from backend if we successfully saved (savedProduct exists)
+      // This prevents overwriting the image with stale data if the save failed
+      if (savedProduct) {
+        // Reload products from backend after a delay to ensure backend has processed the save
+        // Use a longer delay to ensure image processing is complete
+        // This ensures consistency but doesn't block the UI update
+        const savedImagePath = savedProduct.image
+        console.log('💾 Saved image path for reload check:', savedImagePath)
+        
+        setTimeout(async () => {
+          console.log('🔄 Syncing products with backend after update...')
+          const reloaded = await reloadProductsFromBackend()
+          if (reloaded) {
+            console.log('✅ Products synced with backend after update')
+            // After reload, ALWAYS ensure the saved image path is used (it's the source of truth from the save)
+            if (savedImagePath && !savedImagePath.startsWith('blob:')) {
+              setProducts(prev => {
+                const reloadedProduct = prev.find(p => p.id === productId)
+                console.log('🔍 After reload check:', {
+                  productId: productId,
+                  reloadedProductExists: !!reloadedProduct,
+                  reloadedProductImage: reloadedProduct?.image,
+                  savedImagePath: savedImagePath,
+                  imagesMatch: reloadedProduct?.image === savedImagePath
+                })
+                
+                // ALWAYS use savedImagePath if it exists (it's from the successful save)
+                if (reloadedProduct) {
+                  if (reloadedProduct.image !== savedImagePath) {
+                    console.log('🔧🔧🔧 FORCING image path after reload:', savedImagePath, '(reloaded had:', reloadedProduct.image, ')')
+                    return prev.map(p => p.id === productId ? { ...p, image: savedImagePath } : p)
+                  } else {
+                    console.log('✅ Image path matches after reload:', savedImagePath)
+                  }
+                }
+                return prev
+              })
+            } else {
+              // Log if we expected an image but don't have one
+              setProducts(prev => {
+                const reloadedProduct = prev.find(p => p.id === productId)
+                if (reloadedProduct) {
+                  console.log('🔍 After reload, product image:', reloadedProduct.image, '(savedImagePath was:', savedImagePath, ')')
+                }
+                return prev
+              })
+            }
+          }
+        }, 1500) // Increased delay to 1.5 seconds to ensure backend processing is complete
+      } else {
+        console.warn('⚠️ Not reloading from backend - save failed (savedProduct is null). Product updated locally with temporary blob URL.')
+        console.warn('⚠️ Image will NOT persist after page reload. Please check backend connection and try saving again.')
       }
 
       cancelEditing()
@@ -9758,12 +10094,26 @@ function App() {
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', flexShrink: 0, minWidth: '105px', justifyContent: 'center' }}>
                                     <button
                                       onClick={async () => {
-                                        if (editingEmployee.name && editingEmployee.age && editingEmployee.contact && editingEmployee.email && editingEmployee.emergencyContact && editingEmployee.hourlyPay && editingEmployee.password && editingEmployee.homeAddress && editingEmployee.ssn) {
-                                          const updatedTeamMembers = teamMembers.map(emp => 
-                                            emp.id === employee.id 
-                                              ? { ...emp, ...editingEmployee }
-                                              : emp
-                                          )
+                                        // Helper function to set empty strings to 'N/A'
+                                        const setNAIfEmpty = (value) => (value && value.trim() !== '') ? value : 'N/A'
+                                        
+                                        const updatedEmployee = {
+                                          name: setNAIfEmpty(editingEmployee.name),
+                                          age: setNAIfEmpty(editingEmployee.age),
+                                          contact: setNAIfEmpty(editingEmployee.contact),
+                                          email: setNAIfEmpty(editingEmployee.email),
+                                          emergencyContact: setNAIfEmpty(editingEmployee.emergencyContact),
+                                          hourlyPay: setNAIfEmpty(editingEmployee.hourlyPay),
+                                          password: setNAIfEmpty(editingEmployee.password),
+                                          homeAddress: setNAIfEmpty(editingEmployee.homeAddress),
+                                          ssn: setNAIfEmpty(editingEmployee.ssn)
+                                        }
+                                        
+                                        const updatedTeamMembers = teamMembers.map(emp => 
+                                          emp.id === employee.id 
+                                            ? { ...emp, ...updatedEmployee }
+                                            : emp
+                                        )
                                           setTeamMembers(updatedTeamMembers)
                                           // Immediately save to backend and await to ensure it completes
                                           if (currentUser && currentUser.email) {
@@ -9783,9 +10133,6 @@ function App() {
                                           }
                                           setEditingEmployeeId(null)
                                           setEditingEmployee({ name: '', age: '', contact: '', email: '', emergencyContact: '', hourlyPay: '', password: '', homeAddress: '', ssn: '' })
-                                        } else {
-                                          alert('Please fill in all fields')
-                                        }
                                       }}
                                       style={{
                                         padding: '0.6rem 1rem',
@@ -9834,43 +10181,46 @@ function App() {
                                   <div style={{ display: 'flex', flexDirection: 'row', gap: '2rem', flex: 1, alignItems: 'center', justifyContent: 'flex-start', minWidth: 0, overflowX: 'visible', overflowY: 'visible', flexWrap: 'nowrap', alignContent: 'center' }}>
                                     <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'flex-start', minWidth: 0, flexShrink: 0, alignSelf: 'center', verticalAlign: 'top', marginTop: 0, paddingTop: 0 }}>
                                       <strong style={{ color: '#1e3a5f', fontSize: '1.05rem', whiteSpace: 'nowrap', marginBottom: '0.3rem', lineHeight: '1.2', display: 'block', marginTop: 0, paddingTop: 0, verticalAlign: 'top', height: 'auto', minHeight: '1.26rem' }}>Name:</strong>
-                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.name}</div>
+                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.name && employee.name !== 'N/A' ? employee.name : 'N/A'}</div>
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'flex-start', minWidth: 0, flexShrink: 0, alignSelf: 'center', verticalAlign: 'top', marginTop: 0, paddingTop: 0 }}>
                                       <strong style={{ color: '#1e3a5f', fontSize: '1.05rem', whiteSpace: 'nowrap', marginBottom: '0.3rem', lineHeight: '1.2', display: 'block', marginTop: 0, paddingTop: 0, verticalAlign: 'top', height: 'auto', minHeight: '1.26rem' }}>Contact:</strong>
-                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.contact}</div>
+                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.contact && employee.contact !== 'N/A' ? employee.contact : 'N/A'}</div>
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'flex-start', minWidth: 0, flexShrink: 0, alignSelf: 'center', verticalAlign: 'top', marginTop: 0, paddingTop: 0 }}>
                                       <strong style={{ color: '#1e3a5f', fontSize: '1.05rem', whiteSpace: 'nowrap', marginBottom: '0.3rem', lineHeight: '1.2', display: 'block', marginTop: 0, paddingTop: 0, verticalAlign: 'top', height: 'auto', minHeight: '1.26rem' }}>Email:</strong>
-                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.email || 'N/A'}</div>
+                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.email && employee.email !== 'N/A' ? employee.email : 'N/A'}</div>
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'flex-start', minWidth: 0, flexShrink: 0, alignSelf: 'center', verticalAlign: 'top', marginTop: 0, paddingTop: 0 }}>
                                       <strong style={{ color: '#1e3a5f', fontSize: '1.05rem', whiteSpace: 'nowrap', marginBottom: '0.3rem', lineHeight: '1.2', display: 'block', marginTop: 0, paddingTop: 0, verticalAlign: 'top', height: 'auto', minHeight: '1.26rem' }}>Date of Birth:</strong>
-                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.age ? new Date(employee.age).toLocaleDateString() : 'N/A'}</div>
+                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.age && employee.age !== 'N/A' ? (new Date(employee.age).toLocaleDateString() !== 'Invalid Date' ? new Date(employee.age).toLocaleDateString() : employee.age) : 'N/A'}</div>
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'flex-start', minWidth: 0, flexShrink: 0, alignSelf: 'center', verticalAlign: 'top', marginTop: 0, paddingTop: 0 }}>
                                       <strong style={{ color: '#1e3a5f', fontSize: '1.05rem', whiteSpace: 'nowrap', marginBottom: '0.3rem', lineHeight: '1.2', display: 'block', marginTop: 0, paddingTop: 0, verticalAlign: 'top', height: 'auto', minHeight: '1.26rem' }}>Emergency Contact:</strong>
-                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.emergencyContact}</div>
+                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.emergencyContact && employee.emergencyContact !== 'N/A' ? employee.emergencyContact : 'N/A'}</div>
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'flex-start', minWidth: 0, flexShrink: 0, alignSelf: 'center', verticalAlign: 'top', marginTop: 0, paddingTop: 0 }}>
                                       <strong style={{ color: '#1e3a5f', fontSize: '1.05rem', whiteSpace: 'nowrap', marginBottom: '0.3rem', lineHeight: '1.2', display: 'block', marginTop: 0, paddingTop: 0, verticalAlign: 'top', height: 'auto', minHeight: '1.26rem' }}>Hourly Pay:</strong>
-                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.hourlyPay ? `$${employee.hourlyPay}` : 'N/A'}</div>
+                                      <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.hourlyPay && employee.hourlyPay !== 'N/A' ? `$${employee.hourlyPay}` : 'N/A'}</div>
                                     </div>
                                   </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', flexShrink: 0, minWidth: '105px', justifyContent: 'center', alignSelf: 'center' }}>
                                     <button
                                       onClick={() => {
+                                        // Helper function to convert 'N/A' back to empty string for editing
+                                        const convertNAToEmpty = (value) => (value && value !== 'N/A') ? value : ''
+                                        
                                         setEditingEmployeeId(employee.id)
                                         setEditingEmployee({
-                                          name: employee.name,
-                                          age: employee.age,
-                                          contact: employee.contact,
-                                          email: employee.email || '',
-                                          emergencyContact: employee.emergencyContact,
-                                          hourlyPay: employee.hourlyPay || '',
-                                          password: employee.password || '',
-                                          homeAddress: employee.homeAddress || '',
-                                          ssn: employee.ssn || ''
+                                          name: convertNAToEmpty(employee.name),
+                                          age: convertNAToEmpty(employee.age),
+                                          contact: convertNAToEmpty(employee.contact),
+                                          email: convertNAToEmpty(employee.email),
+                                          emergencyContact: convertNAToEmpty(employee.emergencyContact),
+                                          hourlyPay: convertNAToEmpty(employee.hourlyPay),
+                                          password: convertNAToEmpty(employee.password),
+                                          homeAddress: convertNAToEmpty(employee.homeAddress),
+                                          ssn: convertNAToEmpty(employee.ssn)
                                         })
                                       }}
                                       style={{
@@ -10055,19 +10405,21 @@ function App() {
                       </div>
                       <button
                         onClick={async () => {
-                          if (newEmployee.name && newEmployee.age && newEmployee.contact && newEmployee.email && newEmployee.emergencyContact && newEmployee.hourlyPay && newEmployee.password && newEmployee.homeAddress && newEmployee.ssn) {
-                            const employee = {
-                              id: Date.now(),
-                              name: newEmployee.name,
-                              age: newEmployee.age,
-                              contact: newEmployee.contact,
-                              email: newEmployee.email,
-                              emergencyContact: newEmployee.emergencyContact,
-                              hourlyPay: newEmployee.hourlyPay,
-                              password: newEmployee.password,
-                              homeAddress: newEmployee.homeAddress,
-                              ssn: newEmployee.ssn
-                            }
+                          // Helper function to set empty strings to 'N/A'
+                          const setNAIfEmpty = (value) => (value && value.trim() !== '') ? value : 'N/A'
+                          
+                          const employee = {
+                            id: Date.now(),
+                            name: setNAIfEmpty(newEmployee.name),
+                            age: setNAIfEmpty(newEmployee.age),
+                            contact: setNAIfEmpty(newEmployee.contact),
+                            email: setNAIfEmpty(newEmployee.email),
+                            emergencyContact: setNAIfEmpty(newEmployee.emergencyContact),
+                            hourlyPay: setNAIfEmpty(newEmployee.hourlyPay),
+                            password: setNAIfEmpty(newEmployee.password),
+                            homeAddress: setNAIfEmpty(newEmployee.homeAddress),
+                            ssn: setNAIfEmpty(newEmployee.ssn)
+                          }
                             console.log('📝 Creating new employee with all fields:', {
                               id: employee.id,
                               name: employee.name,
@@ -10098,9 +10450,6 @@ function App() {
                               }
                             }
                             setNewEmployee({ name: '', age: '', contact: '', email: '', emergencyContact: '', hourlyPay: '', password: '', homeAddress: '', ssn: '' })
-                          } else {
-                            alert('Please fill in all fields')
-                          }
                         }}
                         style={{
                           marginTop: 'auto',
@@ -11671,28 +12020,56 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                 {(() => {
                   const imageUrl = getImageUrl(product.image)
                   // Always try to show blob URLs (they're temporary but should display)
-                  // For other images, check if they're marked as failed
                   const isBlobUrl = product.image?.startsWith('blob:')
                   const isPendingBlob = isBlobUrl && pendingBlobUrls.has(product.image)
-                  // Show image if: it exists AND (it's a blob URL OR it's not marked as failed)
-                  const hasImage = imageUrl && (isBlobUrl || !failedImages.has(product.id))
                   
-                  // Debug logging
+                  // Show image if URL exists (always try to show, even if previously marked as failed)
+                  // The onError handler will mark it as failed if it doesn't load
+                  const hasImage = !!imageUrl
+                  
+                  // Debug logging - ALWAYS log image state to help diagnose display issues
                   if (product.image) {
-                    console.log(`Product ${product.id} (${product.name}): image=${product.image}, imageUrl=${imageUrl}, hasImage=${hasImage}, isBlob=${isBlobUrl}, failedImages.has=${failedImages.has(product.id)}, pendingBlobUrls.has=${pendingBlobUrls.has(product.image)}`)
+                    const isFailed = failedImages.has(product.id)
+                    console.log(`🖼️ Product ${product.id} (${product.name}):`, {
+                      image: product.image,
+                      imageUrl: imageUrl,
+                      hasImage: hasImage,
+                      isFailed: isFailed,
+                      isBlobUrl: isBlobUrl,
+                      imageBaseUrl: IMAGE_BASE_URL,
+                      constructedUrl: getImageUrl(product.image)
+                    })
+                    if (isFailed) {
+                      console.log(`ℹ️ Product ${product.id} was previously marked as failed, but will attempt to load: ${imageUrl}`)
+                    }
+                  } else {
+                    console.warn(`⚠️ Product ${product.id} (${product.name}) has NO image set!`)
                   }
                   
                   return (
                     <>
                       {/* Image always renders first, above the product name - square dimensions */}
                       {hasImage ? (
-                        <div className="product-image-placeholder" style={{ position: 'relative' }}>
+                        <div className="product-image-placeholder" style={{ position: 'relative', backgroundColor: '#e0e0e0' }}>
                           <img 
                             key={`${product.id}-${product.image || 'no-image'}`}
                             src={imageUrl} 
-                            alt={product.name} 
+                            alt="" 
                             className="product-image"
-                            crossOrigin="anonymous"
+                            style={{ 
+                              display: 'block', 
+                              position: 'absolute',
+                              top: 0,
+                              left: 0,
+                              width: '100%', 
+                              height: '100%', 
+                              objectFit: 'contain',
+                              backgroundColor: 'transparent'
+                            }}
+                            onLoadStart={() => {
+                              console.log('🔄 Image load started:', imageUrl, 'for product:', product.name)
+                              console.log('🔄 Image path:', product.image, 'Full URL:', imageUrl)
+                            }}
                             onError={(e) => {
                               // If image fails to load, check if it's a pending blob URL first
                               const isPendingBlob = product.image?.startsWith('blob:') && pendingBlobUrls.has(product.image)
@@ -11704,14 +12081,60 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                                 return
                               }
                               
-                              // For non-pending images, mark as failed
+                              // For non-pending images, log detailed error information
                               console.error('❌ Failed to load image:', imageUrl, 'for product:', product.name)
                               console.error('❌ Product image value:', product.image)
+                              console.error('❌ Image base URL:', IMAGE_BASE_URL)
+                              console.error('❌ Backend base URL:', BACKEND_BASE_URL)
+                              console.error('❌ Constructed URL:', getImageUrl(product.image))
                               console.error('❌ Error details:', e.target.error || 'Unknown error')
-                              setFailedImages(prev => new Set(prev).add(product.id))
-                              e.target.style.display = 'none'
+                              console.error('❌ Image element:', {
+                                src: e.target.src,
+                                naturalWidth: e.target.naturalWidth,
+                                naturalHeight: e.target.naturalHeight,
+                                complete: e.target.complete
+                              })
+                              
+                              // Capture target reference before setTimeout
+                              const imgElement = e.target
+                              
+                              // DON'T hide the image immediately - keep it visible and retry
+                              // Many image load failures are temporary (CORS, network, etc.)
+                              console.log('⏳ Image failed to load, will retry without hiding...')
+                              
+                              // Retry immediately with a small delay
+                              setTimeout(() => {
+                                // Check if image loaded in the meantime
+                                if (imgElement && imgElement.complete && imgElement.naturalWidth > 0) {
+                                  console.log('✅ Image loaded successfully after retry')
+                                  setFailedImages(prev => {
+                                    const newSet = new Set(prev)
+                                    newSet.delete(product.id)
+                                    return newSet
+                                  })
+                                  return
+                                }
+                                
+                                // Still failed - try reloading with cache bust
+                                console.warn('⚠️ Image still failed, retrying with cache-bust parameter')
+                                if (imgElement) {
+                                  const retryUrl = imageUrl + (imageUrl.includes('?') ? '&' : '?') + '_retry=' + Date.now()
+                                  console.log('🔄 Retrying with URL:', retryUrl)
+                                  imgElement.src = retryUrl
+                                  // Keep image visible - don't hide it
+                                }
+                                
+                                // Mark as failed after multiple retries, but still show placeholder
+                                setTimeout(() => {
+                                  if (imgElement && (!imgElement.complete || imgElement.naturalWidth === 0)) {
+                                    console.warn('⚠️ Image failed after multiple retries for product:', product.name)
+                                    setFailedImages(prev => new Set(prev).add(product.id))
+                                    // Still don't hide - let the placeholder show ingredients instead
+                                  }
+                                }, 3000)
+                              }, 1000) // Retry after 1 second
                             }}
-                            onLoad={() => {
+                            onLoad={(e) => {
                               console.log('✅ Image loaded successfully:', imageUrl, 'for product:', product.name)
                               // Remove from failed images if it was previously marked as failed
                               setFailedImages(prev => {
@@ -11720,7 +12143,6 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                                 return newSet
                               })
                             }}
-                            style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}
                           />
                           {isEditMode && (
                             <button 
@@ -11902,18 +12324,44 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
                   <div className="form-group">
                     <label htmlFor="product-image">Product Image</label>
                     <div className="image-upload-section">
-                      {editFormData.imagePreview && (
-                        <div className="image-preview-small">
+                      <div className="image-preview-small" style={{ 
+                        minHeight: '250px', 
+                        backgroundColor: editFormData.imagePreview ? 'transparent' : '#e0e0e0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        position: 'relative'
+                      }}>
+                        {isProcessingImage && !editFormData.imagePreview && (
+                          <div style={{ textAlign: 'center', color: '#888', fontSize: '0.9rem' }}>
+                            Processing image...
+                          </div>
+                        )}
+                        {editFormData.imagePreview && (
                           <img 
                             src={editFormData.imagePreview} 
                             alt="Product preview" 
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover',
+                              display: 'block',
+                              opacity: isProcessingImage ? 0.5 : 1,
+                              transition: 'opacity 0.3s',
+                              position: 'absolute',
+                              top: 0,
+                              left: 0
+                            }}
                             onError={(e) => {
                               console.error('Failed to load image preview:', editFormData.imagePreview)
                               e.target.style.display = 'none'
                             }}
+                            onLoad={() => {
+                              setIsProcessingImage(false)
+                            }}
                           />
-                        </div>
-                      )}
+                        )}
+                      </div>
                       <div className="image-upload-buttons">
                         <label htmlFor="product-image" className="file-upload-btn-small">
                           <input
@@ -13328,7 +13776,14 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
 
       {/* Transaction Details Modal */}
       {selectedTransaction && (
-        <div className="modal-overlay" onClick={() => setSelectedTransaction(null)}>
+        <div className="modal-overlay" style={{ 
+          display: isRefundModalOpen ? 'none' : 'flex',
+          zIndex: 1000
+        }} onClick={() => {
+          if (!isRefundModalOpen) {
+            setSelectedTransaction(null)
+          }
+        }}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ 
             width: '600px', 
             maxWidth: '90vw', 
@@ -13493,7 +13948,10 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
             }}>
               <button 
                 className="btn-primary-small" 
-                onClick={handleRefundTransaction}
+                onClick={() => {
+                  setTransactionForRefund(selectedTransaction) // Store transaction for refund modal
+                  setIsRefundModalOpen(true) // Refund modal will show, transaction details modal will be hidden by CSS
+                }}
                 style={{ 
                   flex: 1,
                   backgroundColor: '#dc3545',
@@ -13509,6 +13967,359 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
               >
                 Close
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Refund Modal */}
+      {isRefundModalOpen && transactionForRefund && (
+        <div className="modal-overlay" onClick={() => {
+          setIsRefundModalOpen(false)
+          setRefundType(null)
+          setPartialRefundMode(null)
+          setSelectedRefundItemIndex(null)
+          setRefundAmount('')
+          setTransactionForRefund(null)
+          // Transaction details modal will automatically show again (it's still mounted, just hidden)
+        }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ 
+            width: '600px', 
+            maxWidth: '90vw', 
+            maxHeight: '90vh',
+            height: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div className="modal-header" style={{ flexShrink: 0 }}>
+              <h2>Refund Transaction</h2>
+              <button className="modal-close-btn" onClick={() => {
+                setIsRefundModalOpen(false)
+                setRefundType(null)
+                setPartialRefundMode(null)
+                setSelectedRefundItemIndex(null)
+                setRefundAmount('')
+                setSelectedTransaction(transactionForRefund) // Reopen transaction details modal on cancel
+                setTransactionForRefund(null)
+              }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            <div className="modal-body transaction-modal-body" style={{ 
+              overflowY: 'auto', 
+              flex: 1,
+              minHeight: 0,
+              padding: '1.25rem'
+            }}>
+              {!refundType ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: '600', marginBottom: '0.5rem', color: '#333' }}>
+                    Select Refund Type:
+                  </h3>
+                  <button
+                    onClick={() => setRefundType('full')}
+                    style={{
+                      padding: '1rem',
+                      backgroundColor: '#f9f9f9',
+                      border: '2px solid #ddd',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '1rem',
+                      fontWeight: '600',
+                      color: '#333',
+                      textAlign: 'left',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseOver={(e) => {
+                      e.target.style.backgroundColor = '#e9ecef'
+                      e.target.style.borderColor = '#1e3a5f'
+                    }}
+                    onMouseOut={(e) => {
+                      e.target.style.backgroundColor = '#f9f9f9'
+                      e.target.style.borderColor = '#ddd'
+                    }}
+                  >
+                    <div style={{ fontWeight: '700', marginBottom: '0.25rem', pointerEvents: 'none' }}>Full Refund</div>
+                    <div style={{ fontSize: '0.9rem', color: '#666', fontWeight: '400', pointerEvents: 'none' }}>
+                      Refund the entire transaction amount (${(transactionForRefund?.total || 0).toFixed(2)})
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setRefundType('partial')}
+                    style={{
+                      padding: '1rem',
+                      backgroundColor: '#f9f9f9',
+                      border: '2px solid #ddd',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '1rem',
+                      fontWeight: '600',
+                      color: '#333',
+                      textAlign: 'left',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseOver={(e) => {
+                      e.target.style.backgroundColor = '#e9ecef'
+                      e.target.style.borderColor = '#1e3a5f'
+                    }}
+                    onMouseOut={(e) => {
+                      e.target.style.backgroundColor = '#f9f9f9'
+                      e.target.style.borderColor = '#ddd'
+                    }}
+                  >
+                    <div style={{ fontWeight: '700', marginBottom: '0.25rem', pointerEvents: 'none' }}>Partial Refund</div>
+                    <div style={{ fontSize: '0.9rem', color: '#666', fontWeight: '400', pointerEvents: 'none' }}>
+                      Refund a specific item or dollar amount
+                    </div>
+                  </button>
+                </div>
+              ) : refundType === 'partial' && !partialRefundMode ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <button
+                    onClick={() => {
+                      setRefundType(null)
+                    }}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      backgroundColor: 'transparent',
+                      border: '1px solid #ddd',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '0.9rem',
+                      color: '#666',
+                      alignSelf: 'flex-start',
+                      marginBottom: '0.5rem'
+                    }}
+                  >
+                    ← Back
+                  </button>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: '600', marginBottom: '0.5rem', color: '#333' }}>
+                    Select Partial Refund Type:
+                  </h3>
+                  <button
+                    onClick={() => setPartialRefundMode('item')}
+                    style={{
+                      padding: '1rem',
+                      backgroundColor: '#f9f9f9',
+                      border: '2px solid #ddd',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '1rem',
+                      fontWeight: '600',
+                      color: '#333',
+                      textAlign: 'left',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseOver={(e) => {
+                      e.target.style.backgroundColor = '#e9ecef'
+                      e.target.style.borderColor = '#1e3a5f'
+                    }}
+                    onMouseOut={(e) => {
+                      e.target.style.backgroundColor = '#f9f9f9'
+                      e.target.style.borderColor = '#ddd'
+                    }}
+                  >
+                    <div style={{ fontWeight: '700', marginBottom: '0.25rem', pointerEvents: 'none' }}>Refund Specific Item</div>
+                    <div style={{ fontSize: '0.9rem', color: '#666', fontWeight: '400', pointerEvents: 'none' }}>
+                      Select an item from the order to refund
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setPartialRefundMode('amount')}
+                    style={{
+                      padding: '1rem',
+                      backgroundColor: '#f9f9f9',
+                      border: '2px solid #ddd',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '1rem',
+                      fontWeight: '600',
+                      color: '#333',
+                      textAlign: 'left',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseOver={(e) => {
+                      e.target.style.backgroundColor = '#e9ecef'
+                      e.target.style.borderColor = '#1e3a5f'
+                    }}
+                    onMouseOut={(e) => {
+                      e.target.style.backgroundColor = '#f9f9f9'
+                      e.target.style.borderColor = '#ddd'
+                    }}
+                  >
+                    <div style={{ fontWeight: '700', marginBottom: '0.25rem', pointerEvents: 'none' }}>Refund Dollar Amount</div>
+                    <div style={{ fontSize: '0.9rem', color: '#666', fontWeight: '400', pointerEvents: 'none' }}>
+                      Enter a specific dollar amount to refund
+                    </div>
+                  </button>
+                </div>
+              ) : refundType === 'partial' && partialRefundMode === 'item' ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <button
+                    onClick={() => {
+                      setPartialRefundMode(null)
+                    }}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      backgroundColor: 'transparent',
+                      border: '1px solid #ddd',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '0.9rem',
+                      color: '#666',
+                      alignSelf: 'flex-start',
+                      marginBottom: '0.5rem'
+                    }}
+                  >
+                    ← Back
+                  </button>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: '600', marginBottom: '1rem', color: '#333' }}>
+                    Select Item to Refund:
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '300px', overflowY: 'auto' }}>
+                    {transactionForRefund?.items.map((item, index) => {
+                      const itemTotal = (item.price || 0) * (item.quantity || 0)
+                      const isSelected = selectedRefundItemIndex === index
+                      return (
+                        <button
+                          key={index}
+                          onClick={() => setSelectedRefundItemIndex(index)}
+                          style={{
+                            padding: '1rem',
+                            backgroundColor: isSelected ? '#e7f3ff' : '#f9f9f9',
+                            border: `2px solid ${isSelected ? '#1e3a5f' : '#ddd'}`,
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseOver={(e) => {
+                            if (!isSelected) {
+                              e.target.style.backgroundColor = '#e9ecef'
+                              e.target.style.borderColor = '#1e3a5f'
+                            }
+                          }}
+                          onMouseOut={(e) => {
+                            if (!isSelected) {
+                              e.target.style.backgroundColor = '#f9f9f9'
+                              e.target.style.borderColor = '#ddd'
+                            }
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', pointerEvents: 'none' }}>
+                            <div style={{ flex: 1, pointerEvents: 'none' }}>
+                              <div style={{ fontWeight: '600', color: '#111', fontSize: '1rem', marginBottom: '0.25rem', pointerEvents: 'none' }}>
+                                {item.quantity}x {item.name}
+                              </div>
+                            </div>
+                            <div style={{ fontWeight: '600', color: '#111', fontSize: '1rem', marginLeft: '1rem', pointerEvents: 'none' }}>
+                              ${itemTotal.toFixed(2)}
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : refundType === 'partial' && partialRefundMode === 'amount' ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  <button
+                    onClick={() => {
+                      setPartialRefundMode(null)
+                      setRefundAmount('')
+                    }}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      backgroundColor: 'transparent',
+                      border: '1px solid #ddd',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '0.9rem',
+                      color: '#666',
+                      alignSelf: 'flex-start',
+                      marginBottom: '0.5rem'
+                    }}
+                  >
+                    ← Back
+                  </button>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: '600', marginBottom: '0.5rem', color: '#333' }}>
+                    Enter Refund Amount:
+                  </h3>
+                  <div style={{ marginBottom: '0.5rem', color: '#666', fontSize: '0.9rem' }}>
+                    Transaction Total: ${(transactionForRefund?.total || 0).toFixed(2)}
+                  </div>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    max={transactionForRefund?.total || 0}
+                    value={refundAmount}
+                    onChange={(e) => setRefundAmount(e.target.value)}
+                    placeholder="0.00"
+                    style={{
+                      padding: '0.75rem',
+                      fontSize: '1.1rem',
+                      border: '2px solid #ddd',
+                      borderRadius: '8px',
+                      width: '100%',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                  {refundAmount && parseFloat(refundAmount) > 0 && (
+                    <div style={{ 
+                      padding: '0.75rem',
+                      backgroundColor: '#e7f3ff',
+                      borderRadius: '6px',
+                      color: '#1e3a5f',
+                      fontSize: '0.9rem'
+                    }}>
+                      Refund Amount: ${parseFloat(refundAmount).toFixed(2)}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+            <div className="modal-footer" style={{ 
+              display: 'flex', 
+              gap: '1rem',
+              padding: '1rem 1.5rem',
+              borderTop: '2px solid #eee',
+              flexShrink: 0
+            }}>
+              <button 
+                className="btn-primary-small" 
+                onClick={() => {
+                  setIsRefundModalOpen(false)
+                  setRefundType(null)
+                  setPartialRefundMode(null)
+                  setSelectedRefundItemIndex(null)
+                  setRefundAmount('')
+                  setSelectedTransaction(transactionForRefund) // Reopen transaction details modal on cancel
+                  setTransactionForRefund(null)
+                }}
+                style={{ flex: 1, backgroundColor: '#6c757d', borderColor: '#6c757d' }}
+              >
+                Cancel
+              </button>
+              {(refundType === 'full' || 
+                (refundType === 'partial' && partialRefundMode === 'item' && selectedRefundItemIndex !== null) ||
+                (refundType === 'partial' && partialRefundMode === 'amount' && refundAmount && parseFloat(refundAmount) > 0)) && (
+                <button 
+                  className="btn-primary-small" 
+                  onClick={handleRefundTransaction}
+                  style={{ 
+                    flex: 1,
+                    backgroundColor: '#dc3545',
+                    borderColor: '#dc3545'
+                  }}
+                >
+                  Process Refund
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -14532,7 +15343,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
 }
 
 // Export the App component
-export { App as default }
+export default App
 
 
 

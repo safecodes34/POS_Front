@@ -347,18 +347,6 @@ export default function RecipeEditor({ menuItemName, userEmail, onClose, onSave 
 
   const handleSelectItem = async (itemId) => {
     setEditingIngredient({ ...editingIngredient, inventory_item_id: itemId });
-    
-    // Auto-calculate yield conversion when item is selected
-    // This will use the most recent invoice data to populate the yield conversion
-    if (itemId && formData.uom) {
-      const yieldConversion = await calculateYieldConversion(itemId, formData.uom);
-      if (yieldConversion !== null && yieldConversion > 0) {
-        setFormData({ ...formData, yield_per_unit: yieldConversion });
-      } else {
-        // Clear yield conversion if calculation returns null or invalid value
-        setFormData({ ...formData, yield_per_unit: null });
-      }
-    }
   };
 
   if (loading && !recipe) {
@@ -632,26 +620,8 @@ export default function RecipeEditor({ menuItemName, userEmail, onClose, onSave 
                   />
                   <select
                     value={formData.uom}
-                    onChange={async (e) => {
-                      const newUom = e.target.value;
-                      setFormData({ ...formData, uom: newUom });
-                      
-                      // Recalculate yield conversion when UOM changes
-                      // This will use the most recent invoice data to recalculate
-                      if (editingIngredient?.inventory_item_id) {
-                        const yieldConversion = await calculateYieldConversion(
-                          editingIngredient.inventory_item_id, 
-                          newUom
-                        );
-                        if (yieldConversion !== null && yieldConversion > 0) {
-                          setFormData({ ...formData, uom: newUom, yield_per_unit: yieldConversion });
-                        } else {
-                          setFormData({ ...formData, uom: newUom, yield_per_unit: null });
-                        }
-                      } else {
-                        // Just update UOM if no item selected yet
-                        setFormData({ ...formData, uom: newUom });
-                      }
+                    onChange={(e) => {
+                      setFormData({ ...formData, uom: e.target.value });
                     }}
                     style={{
                       padding: '0.75rem',
@@ -672,66 +642,6 @@ export default function RecipeEditor({ menuItemName, userEmail, onClose, onSave 
                 </div>
                 <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.25rem' }}>
                   <strong>Example:</strong> If your Chicken Melt uses 0.5oz of chicken, enter <strong>0.5</strong> and select <strong>oz</strong>
-                </p>
-              </div>
-
-              <div style={{ marginBottom: '1.5rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
-                  Yield Conversion (Optional)
-                </label>
-                <div style={{ 
-                  padding: '1rem', 
-                  backgroundColor: '#f8f9fa', 
-                  borderRadius: '6px',
-                  marginBottom: '0.5rem'
-                }}>
-                  <p style={{ fontSize: '0.9rem', margin: '0 0 0.5rem 0', fontWeight: '500' }}>
-                    How many {formData.uom} are in 1 {editingIngredient.inventory_item_id ? allItems.find(i => i.id === editingIngredient.inventory_item_id)?.base_uom || 'case' : 'case'}?
-                  </p>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <span style={{ fontSize: '0.9rem' }}>1 {editingIngredient.inventory_item_id ? allItems.find(i => i.id === editingIngredient.inventory_item_id)?.base_uom || 'case' : 'case'} =</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={formData.yield_per_unit === null || formData.yield_per_unit === undefined ? '' : formData.yield_per_unit}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        // Remove leading zeros and handle empty input
-                        const numValue = value === '' ? null : parseFloat(value);
-                        setFormData({ ...formData, yield_per_unit: isNaN(numValue) ? null : numValue });
-                      }}
-                      onBlur={(e) => {
-                        // Ensure we don't have leading zeros on blur
-                        const value = e.target.value;
-                        if (value === '') {
-                          setFormData({ ...formData, yield_per_unit: null });
-                        } else {
-                          const numValue = parseFloat(value);
-                          if (!isNaN(numValue)) {
-                            setFormData({ ...formData, yield_per_unit: numValue });
-                          }
-                        }
-                      }}
-                      placeholder="e.g., 640"
-                      style={{
-                        width: '120px',
-                        padding: '0.5rem',
-                        border: '1px solid #ddd',
-                        borderRadius: '4px',
-                        fontSize: '1rem',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                    <span style={{ fontSize: '0.9rem' }}>{formData.uom}</span>
-                  </div>
-                </div>
-                <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.25rem' }}>
-                  <strong>Example:</strong> If you buy 40lb of chicken per case, and you're using ounces:
-                  <br />• 1 case = 40lb = 640oz (enter <strong>640</strong>)
-                  <br />• The system will automatically calculate: 0.5oz per melt = 0.00078 cases per melt
-                </p>
-                <p style={{ fontSize: '0.85rem', color: '#999', marginTop: '0.5rem', fontStyle: 'italic' }}>
-                  Leave blank if you buy and use in the same unit (e.g., buy by oz, use by oz)
                 </p>
               </div>
 
