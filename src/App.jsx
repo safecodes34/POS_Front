@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import SecureOnboardingPage from './pages/onboard/SecureOnboardingPage'
 import './App.css'
 import axios from 'axios'
 import { loadStripeTerminal } from '@stripe/terminal-js'
@@ -8071,6 +8072,11 @@ function App() {
     )
   }
 
+  // Handle secure onboarding page (standalone route)
+  if (location.pathname === '/onboard' || location.pathname.startsWith('/onboard')) {
+    return <SecureOnboardingPage />;
+  }
+
   // Use the existing conditional rendering based on activeView
   // This is the working UI
   return (
@@ -10204,6 +10210,144 @@ function App() {
                                       <div style={{ color: '#333', fontSize: '0.85rem', whiteSpace: 'nowrap', lineHeight: '1.2', verticalAlign: 'top', marginTop: 0, paddingTop: 0, fontWeight: 'bold' }}>{employee.hourlyPay && employee.hourlyPay !== 'N/A' ? `$${employee.hourlyPay}` : 'N/A'}</div>
                                     </div>
                                   </div>
+                                  {/* Onboarding Status and Collected Fields */}
+                                  {employee.onboarding && (
+                                    <div style={{ 
+                                      display: 'flex', 
+                                      flexDirection: 'column', 
+                                      gap: '0.75rem', 
+                                      padding: '0.75rem',
+                                      backgroundColor: '#f8f9fa',
+                                      borderRadius: '6px',
+                                      border: '1px solid #e0e0e0',
+                                      minWidth: '200px',
+                                      flexShrink: 0
+                                    }}>
+                                      {/* Status Badge */}
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <span style={{ 
+                                          fontSize: '0.75rem', 
+                                          fontWeight: '600', 
+                                          color: '#1e3a5f'
+                                        }}>Onboarding:</span>
+                                        <span style={{
+                                          padding: '0.25rem 0.5rem',
+                                          borderRadius: '4px',
+                                          fontSize: '0.75rem',
+                                          fontWeight: '600',
+                                          backgroundColor: 
+                                            employee.onboarding.status === 'completed' ? '#d4edda' :
+                                            employee.onboarding.status === 'in_progress' ? '#fff3cd' :
+                                            '#d1ecf1',
+                                          color: 
+                                            employee.onboarding.status === 'completed' ? '#155724' :
+                                            employee.onboarding.status === 'in_progress' ? '#856404' :
+                                            '#0c5460',
+                                          textTransform: 'capitalize'
+                                        }}>
+                                          {employee.onboarding.status === 'completed' ? '✓ Completed' :
+                                           employee.onboarding.status === 'in_progress' ? '⏳ In Progress' :
+                                           '📧 Invited'}
+                                        </span>
+                                      </div>
+                                      
+                                      {/* Current Step */}
+                                      {employee.onboarding.step_key && employee.onboarding.step_key !== 'done' && (
+                                        <div style={{ fontSize: '0.75rem', color: '#666' }}>
+                                          Step: <strong>{employee.onboarding.step_key.replace(/_/g, ' ')}</strong>
+                                        </div>
+                                      )}
+                                      
+                                      {/* Collected Fields Preview */}
+                                      {employee.onboarding.profile_json && Object.keys(employee.onboarding.profile_json).length > 0 && (
+                                        <div style={{ fontSize: '0.75rem' }}>
+                                          <div style={{ fontWeight: '600', color: '#1e3a5f', marginBottom: '0.25rem' }}>Collected:</div>
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                                            {employee.onboarding.profile_json.legal_name && (
+                                              <div style={{ color: '#333' }}>
+                                                <strong>Name:</strong> {employee.onboarding.profile_json.legal_name}
+                                              </div>
+                                            )}
+                                            {employee.onboarding.profile_json.address && (
+                                              <div style={{ color: '#333' }}>
+                                                <strong>Address:</strong> {employee.onboarding.profile_json.address.substring(0, 40)}{employee.onboarding.profile_json.address.length > 40 ? '...' : ''}
+                                              </div>
+                                            )}
+                                            {employee.onboarding.profile_json.start_date && (
+                                              <div style={{ color: '#333' }}>
+                                                <strong>Start Date:</strong> {employee.onboarding.profile_json.start_date}
+                                              </div>
+                                            )}
+                                            {employee.onboarding.profile_json.w4_filing_status && (
+                                              <div style={{ color: '#333' }}>
+                                                <strong>W-4 Status:</strong> {employee.onboarding.profile_json.w4_filing_status}
+                                              </div>
+                                            )}
+                                            {employee.onboarding.profile_json.w4_dependents !== undefined && (
+                                              <div style={{ color: '#333' }}>
+                                                <strong>Dependents:</strong> {employee.onboarding.profile_json.w4_dependents}
+                                              </div>
+                                            )}
+                                            {/* Don't show sensitive fields (SSN, DOB, bank info) in preview */}
+                                          </div>
+                                        </div>
+                                      )}
+                                      
+                                      {/* Apply to Profile Button (only show if completed) */}
+                                      {employee.onboarding.status === 'completed' && (
+                                        <button
+                                          onClick={async () => {
+                                            if (!employee.onboarding || !employee.onboarding.profile_json) return;
+                                            
+                                            const profile = employee.onboarding.profile_json;
+                                            const updatedEmployee = {
+                                              ...employee,
+                                              // Apply non-sensitive fields
+                                              name: profile.legal_name || employee.name,
+                                              homeAddress: profile.address || employee.homeAddress,
+                                              age: profile.start_date || employee.age,
+                                              // Don't apply sensitive fields (SSN, DOB, bank info) unless encrypted
+                                            };
+                                            
+                                            const updatedTeamMembers = teamMembers.map(emp => 
+                                              emp.id === employee.id ? updatedEmployee : emp
+                                            );
+                                            setTeamMembers(updatedTeamMembers);
+                                            
+                                            if (currentUser && currentUser.email) {
+                                              try {
+                                                justSavedTeamMembersRef.current = true;
+                                                await saveTeamMembersToBackend(updatedTeamMembers);
+                                                justSavedTeamMembersRef.current = false;
+                                                alert('Onboarding data applied to profile successfully!');
+                                              } catch (error) {
+                                                console.error('Error applying onboarding data:', error);
+                                                alert('Failed to save changes. Please try again.');
+                                                justSavedTeamMembersRef.current = false;
+                                              }
+                                            }
+                                          }}
+                                          style={{
+                                            padding: '0.5rem 0.75rem',
+                                            backgroundColor: '#17a2b8',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '4px',
+                                            cursor: 'pointer',
+                                            fontSize: '0.85rem',
+                                            fontWeight: '600',
+                                            transition: 'background-color 0.2s',
+                                            width: '100%',
+                                            marginTop: '0.25rem'
+                                          }}
+                                          onMouseOver={(e) => e.target.style.backgroundColor = '#138496'}
+                                          onMouseOut={(e) => e.target.style.backgroundColor = '#17a2b8'}
+                                        >
+                                          Apply to Profile
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', flexShrink: 0, minWidth: '105px', justifyContent: 'center', alignSelf: 'center' }}>
                                     <button
                                       onClick={() => {
@@ -10240,6 +10384,53 @@ function App() {
                                       onMouseOut={(e) => e.target.style.backgroundColor = '#28a745'}
                                     >
                                       Edit
+                                    </button>
+                                    <button
+                                      onClick={async () => {
+                                        if (!employee.email || employee.email === 'N/A') {
+                                          alert('Employee must have an email address to send onboarding invite.')
+                                          return
+                                        }
+                                        if (!employee.contact || employee.contact === 'N/A') {
+                                          alert('Employee must have a phone number to send onboarding invite.')
+                                          return
+                                        }
+                                        if (!currentUser || !currentUser.email) {
+                                          alert('You must be logged in to send onboarding invites.')
+                                          return
+                                        }
+                                        
+                                        try {
+                                          const response = await axios.post(`${API_BASE_URL}/employee-onboarding/create`, {
+                                            userEmail: currentUser.email,
+                                            name: employee.name,
+                                            phone: employee.contact,
+                                            email: employee.email,
+                                            channelPreference: 'sms'
+                                          })
+                                          alert(`Onboarding invite sent successfully to ${employee.name}!`)
+                                        } catch (error) {
+                                          console.error('Error sending onboarding invite:', error)
+                                          alert(`Failed to send onboarding invite: ${error.response?.data?.error || error.message}`)
+                                        }
+                                      }}
+                                      style={{
+                                        padding: '0.6rem 1rem',
+                                        backgroundColor: '#007bff',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '6px',
+                                        cursor: 'pointer',
+                                        fontSize: '1.05rem',
+                                        fontWeight: '600',
+                                        transition: 'background-color 0.2s',
+                                        width: '100%',
+                                        marginBottom: '0.3rem'
+                                      }}
+                                      onMouseOver={(e) => e.target.style.backgroundColor = '#0056b3'}
+                                      onMouseOut={(e) => e.target.style.backgroundColor = '#007bff'}
+                                    >
+                                      Send Onboarding Invite
                                     </button>
                                     <button
                                       onClick={() => {
