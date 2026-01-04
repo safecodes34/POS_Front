@@ -10400,18 +10400,45 @@ function App() {
                                           return
                                         }
                                         
+                                        // Normalize phone number to E.164 format for Twilio
+                                        const digits = employee.contact.replace(/\D/g, '')
+                                        let normalizedPhone = ''
+                                        if (digits.length === 10) {
+                                          normalizedPhone = `+1${digits}` // US number
+                                        } else if (digits.length === 11 && digits.startsWith('1')) {
+                                          normalizedPhone = `+${digits}`
+                                        } else if (employee.contact.startsWith('+')) {
+                                          normalizedPhone = employee.contact
+                                        } else {
+                                          normalizedPhone = `+1${digits}` // Default to US
+                                        }
+                                        
                                         try {
                                           const response = await axios.post(`${API_BASE_URL}/employee-onboarding/create`, {
                                             userEmail: currentUser.email,
                                             name: employee.name,
-                                            phone: employee.contact,
+                                            phone: normalizedPhone,
                                             email: employee.email,
                                             channelPreference: 'sms'
                                           })
                                           alert(`Onboarding invite sent successfully to ${employee.name}!`)
                                         } catch (error) {
                                           console.error('Error sending onboarding invite:', error)
-                                          alert(`Failed to send onboarding invite: ${error.response?.data?.error || error.message}`)
+                                          const errorData = error.response?.data
+                                          let errorMessage = errorData?.error || error.message
+                                          
+                                          // Include details if available
+                                          if (errorData?.details) {
+                                            errorMessage += `\n\nDetails: ${errorData.details}`
+                                          }
+                                          
+                                          // Include troubleshooting tips if available
+                                          if (errorData?.troubleshooting) {
+                                            const tips = Object.values(errorData.troubleshooting).join('\n')
+                                            errorMessage += `\n\nTroubleshooting:\n${tips}`
+                                          }
+                                          
+                                          alert(`Failed to send onboarding invite: ${errorMessage}`)
                                         }
                                       }}
                                       style={{
@@ -15534,7 +15561,7 @@ Mailing address: 8 The Green, STE E, Dover, DE 19901, USA`}
 }
 
 // Export the App component
-export default App
+export default App;
 
 
 
